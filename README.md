@@ -695,9 +695,9 @@ El `code` es estable y legible por máquinas: el front-end decide con él, no co
 Cada fase termina con algo que puedes **probar en Postman**. No avances a la siguiente fase sin cumplir el "Listo cuando".
 
 ### Fase 0 — Preparación
-- [ ] Crear repositorio Git (`main` + `develop`) y `.gitignore`
-- [ ] Instalar las herramientas de la sección 3
-- [ ] Definir el paquete base (`com.tuempresa.citas`) y la zona horaria
+- [x] Crear repositorio Git (`main` + `develop`) y `.gitignore`
+- [x] Instalar las herramientas de la sección 3
+- [x] Definir el paquete base (`com.tuempresa.citas`) y la zona horaria
 - [ ] Crear en Postman la colección `Citas API` y el environment `local` (`baseUrl = http://localhost:8080/api/v1`)
 
 **Listo cuando:** `java -version`, `docker --version` y `git --version` responden bien.
