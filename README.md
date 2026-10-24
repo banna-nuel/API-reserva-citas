@@ -713,10 +713,10 @@ Cada fase termina con algo que puedes **probar en Postman**. No avances a la sig
 **Listo cuando:** `/actuator/health` devuelve `UP` y las tablas existen en MySQL.
 
 ### Fase 2 — Base transversal
-- [ ] `AppProperties` (configuración tipada) y bean `Clock`
-- [ ] `ApiError`, excepciones propias y `GlobalExceptionHandler`
-- [ ] `PageResponse<T>`
-- [ ] `OpenApiConfig` (Swagger UI)
+- [x] `AppProperties` (configuración tipada) y bean `Clock`
+- [x] `ApiError`, excepciones propias y `GlobalExceptionHandler`
+- [x] `PageResponse<T>`
+- [x] `OpenApiConfig` (Swagger UI)
 
 **Listo cuando:** un error provocado a propósito devuelve el JSON de la sección 8.4.
 
