@@ -394,6 +394,9 @@ Crea `.env.example` (este sí se sube al repositorio) y cópialo a `.env` (este 
 No pongas comentarios al final de una línea de valor: van siempre en su propia línea.
 
 ```dotenv
+# Aplicación
+APP_PORT=8080
+
 # Base de datos
 DB_HOST=localhost
 DB_PORT=3306
@@ -457,6 +460,9 @@ Spring Boot **no** lee `.env` por sí solo. La línea `spring.config.import` de 
 
 ```yaml
 # src/main/resources/application.yml
+server:
+  port: ${APP_PORT:8080}
+
 spring:
   application:
     name: citas-api
@@ -684,8 +690,17 @@ En errores de validación (`400`), `details` lista los campos: `[{ "field": "ema
 | `BusinessRuleException` | 422 | `OUTSIDE_WORKING_HOURS`, `TOO_SOON`, `TOO_FAR`, `SERVICE_NOT_OFFERED`, `CANCELLATION_WINDOW_PASSED` |
 | `ForbiddenOperationException` | 403 | `FORBIDDEN_OPERATION` |
 | `MethodArgumentNotValidException` | 400 | `VALIDATION_ERROR` |
-| `AuthenticationException` | 401 | `INVALID_CREDENTIALS` |
-| `AccessDeniedException` | 403 | `ACCESS_DENIED` |
+| `HandlerMethodValidationException` (restricciones en `@RequestParam`/`@PathVariable`) | 400 | `VALIDATION_ERROR` |
+| `HttpMessageNotReadableException` (cuerpo ausente o JSON mal formado) | 400 | `MALFORMED_REQUEST` |
+| `MethodArgumentTypeMismatchException` (p. ej. texto donde va un número) | 400 | `INVALID_PARAMETER` |
+| `MissingServletRequestParameterException` | 400 | `MISSING_PARAMETER` |
+| `AuthenticationException` (login con email o clave incorrectos, o usuario inactivo) | 401 | `INVALID_CREDENTIALS` |
+| Sin token, token inválido o expirado (`RestAuthenticationEntryPoint`) | 401 | `AUTHENTICATION_REQUIRED` |
+| `AccessDeniedException` (`@PreAuthorize` o `RestAccessDeniedHandler`) | 403 | `ACCESS_DENIED` |
+| `NoResourceFoundException` (la ruta no existe) | 404 | `ENDPOINT_NOT_FOUND` |
+| `HttpRequestMethodNotSupportedException` (incluye la cabecera `Allow`) | 405 | `METHOD_NOT_ALLOWED` |
+| Otras excepciones 4xx de Spring MVC | 406, 415… | El nombre del estado HTTP: `NOT_ACCEPTABLE`, `UNSUPPORTED_MEDIA_TYPE`… |
+| Cualquier otra excepción (el detalle solo va al log) | 500 | `INTERNAL_ERROR` |
 
 El `code` es estable y legible por máquinas: el front-end decide con él, no con el texto del mensaje.
 
@@ -721,10 +736,10 @@ Cada fase termina con algo que puedes **probar en Postman**. No avances a la sig
 **Listo cuando:** un error provocado a propósito devuelve el JSON de la sección 8.4.
 
 ### Fase 3 — Usuarios y seguridad
-- [ ] Entidad `User`, enum `Role`, `UserRepository`
-- [ ] `AuthUser`, `CustomUserDetailsService`, `JwtService`, `JwtAuthenticationFilter`, `SecurityConfig` (sección 11)
-- [ ] `POST /auth/register`, `POST /auth/login`, `GET /users/me`
-- [ ] `AdminBootstrap`: un `ApplicationRunner` que crea el primer ADMIN con `app.admin.*` si no existe
+- [x] Entidad `User`, enum `Role`, `UserRepository`
+- [x] `AuthUser`, `CustomUserDetailsService`, `JwtService`, `JwtAuthenticationFilter`, `SecurityConfig` (sección 11)
+- [x] `POST /auth/register`, `POST /auth/login`, `GET /users/me`
+- [x] `AdminBootstrap`: un `ApplicationRunner` que crea el primer ADMIN con `app.admin.*` si no existe
 - [ ] Postman: Register → Login (guarda el token) → Me
 
 **Listo cuando:** sin token → 401, con token → 200, y la contraseña nunca aparece en una respuesta.
