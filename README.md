@@ -824,10 +824,10 @@ Cada fase termina con algo que puedes **probar en Postman**. No avances a la sig
 **Listo cuando:** sin token → 401, con token → 200, y la contraseña nunca aparece en una respuesta.
 
 ### Fase 3b — Resto de usuarios
-- [ ] `PUT /users/me`: solo `fullName` y `phone`
-- [ ] `PATCH /users/me/password`: `204`; `422 INVALID_CURRENT_PASSWORD` y `PASSWORD_UNCHANGED`
-- [ ] `GET /users` (ADMIN): paginado, filtro `role`, `sort` con lista blanca y orden estable
-- [ ] `PATCH /users/{id}/active` (ADMIN): `422 CANNOT_DEACTIVATE_SELF`; el desactivado pierde el acceso de inmediato
+- [x] `PUT /users/me`: solo `fullName` y `phone`
+- [x] `PATCH /users/me/password`: `204`; `422 INVALID_CURRENT_PASSWORD` y `PASSWORD_UNCHANGED`
+- [x] `GET /users` (ADMIN): paginado, filtro `role`, `sort` con lista blanca y orden estable
+- [x] `PATCH /users/{id}/active` (ADMIN): `422 CANNOT_DEACTIVATE_SELF`; el desactivado pierde el acceso de inmediato
 
 **Listo cuando:** cada endpoint responde bien con el rol permitido y falla con uno no permitido (un CLIENT recibe 403 en los de ADMIN), y tras cambiar la contraseña solo funciona el login con la nueva.
 
