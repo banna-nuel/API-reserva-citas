@@ -9,6 +9,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.authentication.InternalAuthenticationServiceException;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.ErrorResponse;
@@ -91,6 +92,12 @@ public class GlobalExceptionHandler {
 	@ExceptionHandler(AuthenticationException.class)
 	public ResponseEntity<ApiError> handleAuth(HttpServletRequest req) {
 		return build(HttpStatus.UNAUTHORIZED, "INVALID_CREDENTIALS", "Credenciales inválidas", req, List.of());
+	}
+
+	// Falla interna al autenticar (p. ej. la BD no responde): es un 500, no un problema de credenciales
+	@ExceptionHandler(InternalAuthenticationServiceException.class)
+	public ResponseEntity<ApiError> handleAuthInternal(InternalAuthenticationServiceException ex, HttpServletRequest req) {
+		return handleUnexpected(ex, req);
 	}
 
 	// Imprescindible: @PreAuthorize lanza esta excepción DENTRO del controlador y,
