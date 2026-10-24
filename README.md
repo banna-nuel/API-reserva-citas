@@ -287,7 +287,7 @@ citas-api/
 │   └── local.postman_environment.json
 └── src
     ├── main
-    │   ├── java/com/tuempresa/citas
+    │   ├── java/com/q/q
     │   │   ├── CitasApiApplication.java
     │   │   ├── config/        AppProperties, AppConfig (Clock), OpenApiConfig, SecurityConfig, AdminBootstrap
     │   │   ├── security/      AuthUser, CustomUserDetailsService, JwtService, JwtAuthenticationFilter,
@@ -312,7 +312,7 @@ citas-api/
     │       ├── application-dev.yml
     │       ├── application-prod.yml
     │       └── db/migration/V1__create_schema.sql
-    └── test/java/com/tuempresa/citas
+    └── test/java/com/q/q
         ├── service/           pruebas unitarias (Mockito)
         ├── repository/        @DataJpaTest + Testcontainers
         ├── controller/        @WebMvcTest
@@ -332,7 +332,8 @@ Entra a <https://start.spring.io> y configura:
 | Project | Maven |
 | Language | Java |
 | Spring Boot | 4.1.x (la última estable; evita SNAPSHOT y RC) |
-| Group / Artifact | `com.tuempresa` / `citas-api` |
+| Group / Artifact | `com.bannanuel` / `citas-api` |
+| Package name | `com.q.q` |
 | Packaging / Java | Jar / 21 |
 | Dependencies | Spring Web, Spring Data JPA, Validation, Spring Security, MySQL Driver, Flyway Migration, Lombok, Spring Boot Actuator, Testcontainers |
 
@@ -503,7 +504,7 @@ spring:
     show-sql: true
 logging:
   level:
-    com.tuempresa.citas: DEBUG
+    com.q.q: DEBUG
 ```
 
 ```yaml
@@ -697,7 +698,7 @@ Cada fase termina con algo que puedes **probar en Postman**. No avances a la sig
 ### Fase 0 — Preparación
 - [x] Crear repositorio Git (`main` + `develop`) y `.gitignore`
 - [x] Instalar las herramientas de la sección 3
-- [x] Definir el paquete base (`com.tuempresa.citas`) y la zona horaria
+- [x] Definir el paquete base (`com.q.q`) y la zona horaria
 - [ ] Crear en Postman la colección `Citas API` y el environment `local` (`baseUrl = http://localhost:8080/api/v1`)
 
 **Listo cuando:** `java -version`, `docker --version` y `git --version` responden bien.
@@ -712,10 +713,10 @@ Cada fase termina con algo que puedes **probar en Postman**. No avances a la sig
 **Listo cuando:** `/actuator/health` devuelve `UP` y las tablas existen en MySQL.
 
 ### Fase 2 — Base transversal
-- [ ] `AppProperties` (configuración tipada) y bean `Clock`
-- [ ] `ApiError`, excepciones propias y `GlobalExceptionHandler`
-- [ ] `PageResponse<T>`
-- [ ] `OpenApiConfig` (Swagger UI)
+- [x] `AppProperties` (configuración tipada) y bean `Clock`
+- [x] `ApiError`, excepciones propias y `GlobalExceptionHandler`
+- [x] `PageResponse<T>`
+- [x] `OpenApiConfig` (Swagger UI)
 
 **Listo cuando:** un error provocado a propósito devuelve el JSON de la sección 8.4.
 
