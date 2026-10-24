@@ -35,6 +35,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.authentication.InternalAuthenticationServiceException;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultMatcher;
@@ -163,6 +164,12 @@ class GlobalExceptionHandlerTest {
 	}
 
 	@Test
+	void internalAuthenticationFailureReturns500NotCredentialsError() throws Exception {
+		mvc.perform(get("/probe/auth-internal"))
+				.andExpectAll(apiError(HttpStatus.INTERNAL_SERVER_ERROR, "INTERNAL_ERROR", "/probe/auth-internal"));
+	}
+
+	@Test
 	void otherSpringMvcClientErrorsKeepTheirStatus() throws Exception {
 		mvc.perform(post("/probe/items").with(csrf())
 						.contentType(MediaType.TEXT_PLAIN)
@@ -252,6 +259,11 @@ class GlobalExceptionHandlerTest {
 		@GetMapping("/bad-credentials")
 		String badCredentials() {
 			throw new BadCredentialsException("Bad credentials");
+		}
+
+		@GetMapping("/auth-internal")
+		String authInternal() {
+			throw new InternalAuthenticationServiceException("La base de datos no responde");
 		}
 
 		@GetMapping("/unexpected")
