@@ -703,11 +703,11 @@ Cada fase termina con algo que puedes **probar en Postman**. No avances a la sig
 **Listo cuando:** `java -version`, `docker --version` y `git --version` responden bien.
 
 ### Fase 1 — Esqueleto y base de datos
-- [ ] Generar el proyecto con Initializr (7.1) y añadir springdoc + JJWT (7.2)
-- [ ] Crear `.env`, `docker-compose.yml` y levantar MySQL (7.3 y 7.4)
-- [ ] Configurar `application.yml` y perfiles (7.5)
-- [ ] Crear `V1__create_schema.sql` (sección 5)
-- [ ] Arrancar la aplicación
+- [x] Generar el proyecto con Initializr (7.1) y añadir springdoc + JJWT (7.2)
+- [x] Crear `.env`, `docker-compose.yml` y levantar MySQL (7.3 y 7.4)
+- [x] Configurar `application.yml` y perfiles (7.5)
+- [x] Crear `V1__create_schema.sql` (sección 5)
+- [x] Arrancar la aplicación
 
 **Listo cuando:** `/actuator/health` devuelve `UP` y las tablas existen en MySQL.
 
