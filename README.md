@@ -579,10 +579,12 @@ Define el contrato **antes** de programar. Esta sección es la fuente de verdad:
 | Método | Ruta | Descripción | Acceso | Éxito |
 |---|---|---|---|---|
 | GET | `/users/me` | Mi perfil | Autenticado | 200 |
-| PUT | `/users/me` | Actualizar mi perfil | Autenticado | 200 |
-| PATCH | `/users/me/password` | Cambiar mi contraseña | Autenticado | 204 |
-| GET | `/users` | Listar usuarios (paginado, filtro `role`) | ADMIN | 200 |
-| PATCH | `/users/{id}/active` | Activar/desactivar usuario | ADMIN | 200 |
+| PUT | `/users/me` | Actualizar mi perfil (solo `fullName` y `phone`) | Autenticado | 200 |
+| PATCH | `/users/me/password` | Cambiar mi contraseña (`currentPassword`, `newPassword`) | Autenticado | 204 |
+| GET | `/users` | Listar usuarios (paginado; `?role=&page=&size=&sort=`) | ADMIN | 200 |
+| PATCH | `/users/{id}/active` | Activar/desactivar usuario (`{ "active": false }`) | ADMIN | 200 |
+
+El email y el rol de un usuario no se cambian por estos endpoints: el email es el `subject` del JWT y el rol lo asigna el alta (registro público → `CLIENT`, alta de profesional → `PROFESSIONAL`).
 
 **Servicios**
 
@@ -624,11 +626,87 @@ Define el contrato **antes** de programar. Esta sección es la fuente de verdad:
 
 ### 8.3 Ejemplos
 
-Login → `200`:
+**Auth y perfil**
+
+Registro → `POST /api/v1/auth/register` (público). El rol siempre es `CLIENT`; si el body trae `role` o `active`, se ignoran:
+
+```json
+{ "fullName": "Ana Pérez", "email": "Ana@Example.com", "password": "una-clave-segura", "phone": "3001234567" }
+```
+
+Respuesta `201` (con cabecera `Location: http://localhost:8080/api/v1/users/me`). El email se guarda en minúsculas y la contraseña nunca se devuelve:
+
+```json
+{
+  "id": 7,
+  "fullName": "Ana Pérez",
+  "email": "ana@example.com",
+  "phone": "3001234567",
+  "role": "CLIENT",
+  "active": true,
+  "createdAt": "2026-10-24T09:02:10.123456"
+}
+```
+
+Errores: `400 VALIDATION_ERROR` (email inválido, contraseña fuera de 8–72 caracteres o de más de 72 bytes) · `409 EMAIL_ALREADY_USED` (sin importar mayúsculas).
+
+Login → `POST /api/v1/auth/login` con `{ "email": "...", "password": "..." }` → `200`:
 
 ```json
 { "accessToken": "eyJhbGciOi...", "tokenType": "Bearer", "expiresInSeconds": 3600 }
 ```
+
+Error: `401 INVALID_CREDENTIALS`, idéntico para email inexistente, contraseña incorrecta o usuario inactivo.
+
+Mi perfil → `GET /api/v1/users/me` → `200` con el mismo cuerpo que el registro (`UserResponse`). Sin token, o con un token inválido o expirado: `401 AUTHENTICATION_REQUIRED`.
+
+**Usuarios**
+
+Actualizar mi perfil → `PUT /api/v1/users/me` (autenticado). Reemplaza solo `fullName` (obligatorio, máx. 120) y `phone` (opcional, máx. 30; si se omite queda vacío). `email`, `role` y `active` se ignoran si vienen en el body:
+
+```json
+{ "fullName": "Ana María Pérez", "phone": "3109876543" }
+```
+
+→ `200` con el `UserResponse` actualizado. Errores: `400 VALIDATION_ERROR` · `401 AUTHENTICATION_REQUIRED`.
+
+Cambiar mi contraseña → `PATCH /api/v1/users/me/password` (autenticado):
+
+```json
+{ "currentPassword": "la-clave-actual", "newPassword": "una-clave-nueva" }
+```
+
+→ `204` sin cuerpo. Errores: `400 VALIDATION_ERROR` (`newPassword` fuera de 8–72 caracteres o de más de 72 bytes, RN-11) · `401 AUTHENTICATION_REQUIRED` · `422 INVALID_CURRENT_PASSWORD` · `422 PASSWORD_UNCHANGED` (la nueva es igual a la actual). Los tokens emitidos antes del cambio siguen siendo válidos hasta expirar (limitación conocida, ver sección 18).
+
+Listar usuarios → `GET /api/v1/users?role=CLIENT&page=0&size=20&sort=createdAt,desc` (ADMIN) → `200`:
+
+```json
+{
+  "content": [
+    { "id": 7, "fullName": "Ana Pérez", "email": "ana@example.com", "phone": "3001234567",
+      "role": "CLIENT", "active": true, "createdAt": "2026-10-24T09:02:10.123456" }
+  ],
+  "page": 0,
+  "size": 20,
+  "totalElements": 1,
+  "totalPages": 1
+}
+```
+
+- `role` es opcional: `ADMIN`, `PROFESSIONAL` o `CLIENT` (en mayúsculas). Otro valor → `400 INVALID_PARAMETER`.
+- `size` vale 20 por defecto y 100 como máximo (un valor mayor se recorta a 100). Pedir una página más allá de la última devuelve `content: []` con los totales reales.
+- `sort` solo acepta `id`, `fullName`, `email`, `role`, `active` y `createdAt`, con `,asc` o `,desc`. Otro campo → `400 INVALID_SORT`. Sin `sort` se ordena por `id` ascendente, y `id` se agrega siempre como desempate para que el orden sea estable entre páginas.
+- Errores: `401 AUTHENTICATION_REQUIRED` · `403 ACCESS_DENIED` (no es ADMIN).
+
+Activar o desactivar un usuario → `PATCH /api/v1/users/{id}/active` (ADMIN):
+
+```json
+{ "active": false }
+```
+
+→ `200` con el `UserResponse` actualizado. El usuario desactivado pierde el acceso en su siguiente petición (su token responde `401`) y ya no puede iniciar sesión. Errores: `400 VALIDATION_ERROR` (falta `active`) · `401 AUTHENTICATION_REQUIRED` · `403 ACCESS_DENIED` · `404 RESOURCE_NOT_FOUND` · `422 CANNOT_DEACTIVATE_SELF` (un admin no puede desactivarse a sí mismo).
+
+**Citas y disponibilidad**
 
 Crear cita → `POST /api/v1/appointments`:
 
@@ -687,8 +765,9 @@ En errores de validación (`400`), `details` lista los campos: `[{ "field": "ema
 |---|---|---|
 | `ResourceNotFoundException` | 404 | `RESOURCE_NOT_FOUND` |
 | `ConflictException` | 409 | `SLOT_NOT_AVAILABLE`, `CLIENT_OVERLAP`, `EMAIL_ALREADY_USED`, `INVALID_STATUS_TRANSITION` |
-| `BusinessRuleException` | 422 | `OUTSIDE_WORKING_HOURS`, `TOO_SOON`, `TOO_FAR`, `SERVICE_NOT_OFFERED`, `CANCELLATION_WINDOW_PASSED` |
+| `BusinessRuleException` | 422 | `OUTSIDE_WORKING_HOURS`, `TOO_SOON`, `TOO_FAR`, `SERVICE_NOT_OFFERED`, `CANCELLATION_WINDOW_PASSED`, `INVALID_CURRENT_PASSWORD`, `PASSWORD_UNCHANGED`, `CANNOT_DEACTIVATE_SELF` |
 | `ForbiddenOperationException` | 403 | `FORBIDDEN_OPERATION` |
+| `BadRequestException` (p. ej. `sort` por un campo no permitido) | 400 | `INVALID_SORT` |
 | `MethodArgumentNotValidException` | 400 | `VALIDATION_ERROR` |
 | `HandlerMethodValidationException` (restricciones en `@RequestParam`/`@PathVariable`) | 400 | `VALIDATION_ERROR` |
 | `HttpMessageNotReadableException` (cuerpo ausente o JSON mal formado) | 400 | `MALFORMED_REQUEST` |
@@ -743,6 +822,14 @@ Cada fase termina con algo que puedes **probar en Postman**. No avances a la sig
 - [ ] Postman: Register → Login (guarda el token) → Me
 
 **Listo cuando:** sin token → 401, con token → 200, y la contraseña nunca aparece en una respuesta.
+
+### Fase 3b — Resto de usuarios
+- [ ] `PUT /users/me`: solo `fullName` y `phone`
+- [ ] `PATCH /users/me/password`: `204`; `422 INVALID_CURRENT_PASSWORD` y `PASSWORD_UNCHANGED`
+- [ ] `GET /users` (ADMIN): paginado, filtro `role`, `sort` con lista blanca y orden estable
+- [ ] `PATCH /users/{id}/active` (ADMIN): `422 CANNOT_DEACTIVATE_SELF`; el desactivado pierde el acceso de inmediato
+
+**Listo cuando:** cada endpoint responde bien con el rol permitido y falla con uno no permitido (un CLIENT recibe 403 en los de ADMIN), y tras cambiar la contraseña solo funciona el login con la nueva.
 
 ### Fase 4 — Catálogo
 - [ ] CRUD de `ServiceOffering` (escritura solo ADMIN; lectura pública, paginada y con filtros)
@@ -1475,6 +1562,7 @@ jobs:
 ## 18. Mejoras futuras
 
 - Refresh tokens y cierre de sesión (lista de tokens revocados).
+- **Limitación conocida:** al cambiar la contraseña, los JWT emitidos antes siguen siendo válidos hasta expirar. Solución posible: guardar `password_changed_at` en `users` y rechazar los tokens con `iat` anterior (o incluir una versión de credenciales en el token). Desactivar un usuario, en cambio, sí corta el acceso de inmediato.
 - Notificaciones por email/WhatsApp y recordatorios programados (`@Scheduled`).
 - Bloqueos de agenda: vacaciones, festivos y ausencias (`time_off`).
 - Citas recurrentes, lista de espera y multi-sede.
