@@ -1,0 +1,13 @@
+# Normaliza fin de linea en el repositorio (LF) y deja que Git decida en el working tree
+* text=auto
+
+# Scripts que se ejecutan en Linux (Dockerfile, CI): siempre LF
+/mvnw text eol=lf
+*.sh text eol=lf
+Dockerfile text eol=lf
+
+# Scripts de Windows: siempre CRLF
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+*.jar binary
