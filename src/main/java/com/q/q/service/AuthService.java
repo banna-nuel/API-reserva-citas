@@ -1,7 +1,5 @@
 package com.q.q.service;
 
-import java.nio.charset.StandardCharsets;
-
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.BadCredentialsException;
@@ -22,14 +20,13 @@ import com.q.q.mapper.UserMapper;
 import com.q.q.repository.UserRepository;
 import com.q.q.security.AuthUser;
 import com.q.q.security.JwtService;
+import com.q.q.security.PasswordPolicy;
 
 import lombok.RequiredArgsConstructor;
 
 @Service
 @RequiredArgsConstructor
 public class AuthService {
-
-	private static final int BCRYPT_MAX_BYTES = 72;
 
 	private final UserRepository users;
 	private final PasswordEncoder passwordEncoder;
@@ -58,7 +55,7 @@ public class AuthService {
 
 	public AuthResponse login(LoginRequest req) {
 		// BCrypt ignora lo que pase de 72 bytes: sin este corte, "clave + cualquier cosa" también entraría
-		if (req.password().getBytes(StandardCharsets.UTF_8).length > BCRYPT_MAX_BYTES) {
+		if (PasswordPolicy.exceedsBcryptLimit(req.password())) {
 			throw new BadCredentialsException("Bad credentials");
 		}
 		Authentication auth = authenticationManager.authenticate(
