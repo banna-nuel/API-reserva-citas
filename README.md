@@ -736,10 +736,10 @@ Cada fase termina con algo que puedes **probar en Postman**. No avances a la sig
 **Listo cuando:** un error provocado a propósito devuelve el JSON de la sección 8.4.
 
 ### Fase 3 — Usuarios y seguridad
-- [ ] Entidad `User`, enum `Role`, `UserRepository`
-- [ ] `AuthUser`, `CustomUserDetailsService`, `JwtService`, `JwtAuthenticationFilter`, `SecurityConfig` (sección 11)
-- [ ] `POST /auth/register`, `POST /auth/login`, `GET /users/me`
-- [ ] `AdminBootstrap`: un `ApplicationRunner` que crea el primer ADMIN con `app.admin.*` si no existe
+- [x] Entidad `User`, enum `Role`, `UserRepository`
+- [x] `AuthUser`, `CustomUserDetailsService`, `JwtService`, `JwtAuthenticationFilter`, `SecurityConfig` (sección 11)
+- [x] `POST /auth/register`, `POST /auth/login`, `GET /users/me`
+- [x] `AdminBootstrap`: un `ApplicationRunner` que crea el primer ADMIN con `app.admin.*` si no existe
 - [ ] Postman: Register → Login (guarda el token) → Me
 
 **Listo cuando:** sin token → 401, con token → 200, y la contraseña nunca aparece en una respuesta.
