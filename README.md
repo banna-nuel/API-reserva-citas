@@ -694,8 +694,9 @@ En errores de validación (`400`), `details` lista los campos: `[{ "field": "ema
 | `HttpMessageNotReadableException` (cuerpo ausente o JSON mal formado) | 400 | `MALFORMED_REQUEST` |
 | `MethodArgumentTypeMismatchException` (p. ej. texto donde va un número) | 400 | `INVALID_PARAMETER` |
 | `MissingServletRequestParameterException` | 400 | `MISSING_PARAMETER` |
-| `AuthenticationException` | 401 | `INVALID_CREDENTIALS` |
-| `AccessDeniedException` | 403 | `ACCESS_DENIED` |
+| `AuthenticationException` (login con email o clave incorrectos, o usuario inactivo) | 401 | `INVALID_CREDENTIALS` |
+| Sin token, token inválido o expirado (`RestAuthenticationEntryPoint`) | 401 | `AUTHENTICATION_REQUIRED` |
+| `AccessDeniedException` (`@PreAuthorize` o `RestAccessDeniedHandler`) | 403 | `ACCESS_DENIED` |
 | `NoResourceFoundException` (la ruta no existe) | 404 | `ENDPOINT_NOT_FOUND` |
 | `HttpRequestMethodNotSupportedException` (incluye la cabecera `Allow`) | 405 | `METHOD_NOT_ALLOWED` |
 | Otras excepciones 4xx de Spring MVC | 406, 415… | El nombre del estado HTTP: `NOT_ACCEPTABLE`, `UNSUPPORTED_MEDIA_TYPE`… |
