@@ -36,7 +36,6 @@ class UserIntegrationTest extends IntegrationTestSupport {
 	private static final String USERS = "/api/v1/users";
 	private static final String MY_PASSWORD = ME + "/password";
 	private static final String NEW_PASSWORD = "otra-clave-segura-456";
-	private static final String[] PAGE_KEYS = { "content", "page", "size", "totalElements", "totalPages" };
 
 	// ---------- PUT /users/me ----------
 
