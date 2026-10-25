@@ -750,7 +750,7 @@ Listar servicios → `GET /api/v1/services?q=consulta&page=0&size=20&sort=price,
 - Sin token, o con el token de un CLIENT o PROFESSIONAL, solo aparecen los servicios activos y el parámetro `active` se ignora. El ADMIN ve todos y puede filtrar con `active=true` o `active=false`. Un token inválido o expirado no da `401` en las lecturas: la petición sigue como anónima.
 - `q` (opcional) busca dentro del nombre sin distinguir mayúsculas; `%` y `_` se buscan como texto literal.
 - `size` vale 20 por defecto y 100 como máximo (un valor mayor se recorta a 100). `sort` solo acepta `id`, `name`, `price`, `durationMinutes` y `createdAt`, con `,asc` o `,desc`; otro campo → `400 INVALID_SORT`. Sin `sort` se ordena por `id` ascendente, y `id` se agrega siempre como desempate.
-- `active` con un valor distinto de `true` o `false` → `400 INVALID_PARAMETER`.
+- `active` con un valor que no sea booleano (p. ej. `active=quizas`) → `400 INVALID_PARAMETER`, para cualquier rol.
 
 Detalle → `GET /api/v1/services/{id}` (público) → `200` con el servicio. Si no existe, o si está inactivo y quien pregunta no es ADMIN → `404 RESOURCE_NOT_FOUND`.
 
@@ -886,7 +886,7 @@ Cada fase termina con algo que puedes **probar en Postman**. No avances a la sig
 **Listo cuando:** cada endpoint responde bien con el rol permitido y falla con uno no permitido (un CLIENT recibe 403 en los de ADMIN), y tras cambiar la contraseña solo funciona el login con la nueva.
 
 ### Fase 4 — Catálogo
-- [ ] CRUD de `ServiceOffering` (escritura solo ADMIN; lectura pública, paginada y con filtros)
+- [x] CRUD de `ServiceOffering` (escritura solo ADMIN; lectura pública, paginada y con filtros)
 - [ ] `Professional`: alta (usuario + perfil) y asignación de servicios
 - [ ] `WorkingHour`: GET/PUT validando que `fin > inicio` y que los bloques de un mismo día no se solapen
 
