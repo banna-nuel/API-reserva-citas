@@ -307,6 +307,26 @@ class UserIntegrationTest extends IntegrationTestSupport {
 		assertThat(users.findById(targetId)).get().extracting(User::isActive).isEqualTo(true);
 	}
 
+	@Test
+	void nonAdminGets403BeforeBodyOrParametersAreValidated() throws Exception {
+		String clientToken = loginToken(registerClient(), PASSWORD);
+		String path = USERS + "/" + idOf(registerClient()) + "/active";
+
+		// La regla por URL de SecurityConfig responde antes que la validación de Spring MVC
+		for (String invalidBody : new String[] { "{}", "{ \"active\": \"quizas\" }", "{ no es json" }) {
+			mvc.perform(patch(path).header(HttpHeaders.AUTHORIZATION, bearer(clientToken))
+							.contentType(MediaType.APPLICATION_JSON).content(invalidBody))
+					.andExpectAll(apiError(HttpStatus.FORBIDDEN, "ACCESS_DENIED", path));
+		}
+		mvc.perform(patch(USERS + "/abc/active").header(HttpHeaders.AUTHORIZATION, bearer(clientToken))
+						.contentType(MediaType.APPLICATION_JSON).content("{}"))
+				.andExpectAll(apiError(HttpStatus.FORBIDDEN, "ACCESS_DENIED", USERS + "/abc/active"));
+		for (String[] param : new String[][] { { "role", "SUPERUSER" }, { "sort", "passwordHash" } }) {
+			mvc.perform(get(USERS).param(param[0], param[1]).header(HttpHeaders.AUTHORIZATION, bearer(clientToken)))
+					.andExpectAll(apiError(HttpStatus.FORBIDDEN, "ACCESS_DENIED", USERS));
+		}
+	}
+
 	// ---------- utilidades ----------
 
 	private MockHttpServletRequestBuilder changePassword(String token, String currentPassword, String newPassword) {
