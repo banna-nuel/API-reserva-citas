@@ -18,7 +18,6 @@ import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Test;
@@ -32,41 +31,18 @@ import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
-import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
-import org.springframework.test.web.servlet.ResultMatcher;
-import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
 import com.jayway.jsonpath.JsonPath;
 import com.q.q.IntegrationTest;
 import com.q.q.config.AppProperties;
 import com.q.q.entity.User;
 import com.q.q.entity.enums.Role;
-import com.q.q.repository.UserRepository;
 import com.q.q.security.AuthUser;
 import com.q.q.security.JwtService;
 
-import tools.jackson.databind.json.JsonMapper;
-
 @IntegrationTest
-class AuthIntegrationTest {
-
-	private static final String REGISTER = "/api/v1/auth/register";
-	private static final String LOGIN = "/api/v1/auth/login";
-	private static final String ME = "/api/v1/users/me";
-	private static final String PASSWORD = "clave-segura-123";
-	private static final String[] ERROR_KEYS = { "timestamp", "status", "error", "code", "message", "path", "details" };
-	private static final String[] USER_KEYS = { "id", "fullName", "email", "phone", "role", "active", "createdAt" };
-	private static final AtomicInteger SEQUENCE = new AtomicInteger();
-
-	@Autowired
-	private MockMvc mvc;
-
-	@Autowired
-	private JsonMapper json;
-
-	@Autowired
-	private UserRepository users;
+class AuthIntegrationTest extends IntegrationTestSupport {
 
 	@Autowired
 	private AppProperties props;
@@ -133,7 +109,7 @@ class AuthIntegrationTest {
 		request.put("role", "ADMIN");
 		request.put("active", false);
 
-		mvc.perform(post(REGISTER).contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(request)))
+		mvc.perform(post(REGISTER).contentType(MediaType.APPLICATION_JSON).content(jsonBody(request)))
 				.andExpect(status().isCreated())
 				.andExpect(jsonPath("$.role").value("CLIENT"))
 				.andExpect(jsonPath("$.active").value(true));
@@ -261,9 +237,7 @@ class AuthIntegrationTest {
 
 	@Test
 	void bootstrapAdminCanAccessAdminOnlyEndpoint() throws Exception {
-		String token = loginToken(IntegrationTest.ADMIN_EMAIL, IntegrationTest.ADMIN_PASSWORD);
-
-		mvc.perform(get(AdminOnlyProbeController.PATH).header(HttpHeaders.AUTHORIZATION, bearer(token)))
+		mvc.perform(get(AdminOnlyProbeController.PATH).header(HttpHeaders.AUTHORIZATION, bearer(adminToken())))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.status").value("ok"));
 	}
@@ -294,73 +268,14 @@ class AuthIntegrationTest {
 		assertThat(output).doesNotContain(PASSWORD, "otra-clave-123", hash, token);
 	}
 
-	// ---------- utilidades ----------
-
-	private static String uniqueEmail() {
-		return "cliente" + SEQUENCE.incrementAndGet() + "-" + System.nanoTime() + "@mail.test";
-	}
-
-	private String registerClient() throws Exception {
-		String email = uniqueEmail();
-		mvc.perform(register("Cliente de prueba", email, PASSWORD)).andExpect(status().isCreated());
-		return email;
-	}
-
-	private void deactivate(String email) {
-		User user = users.findByEmail(email).orElseThrow();
-		user.setActive(false);
-		users.save(user);
-	}
-
-	private MockHttpServletRequestBuilder register(String fullName, String email, String password) {
-		return post(REGISTER).contentType(MediaType.APPLICATION_JSON)
-				.content(json.writeValueAsString(Map.of("fullName", fullName, "email", email, "password", password)));
-	}
-
-	private MockHttpServletRequestBuilder login(String email, String password) {
-		return post(LOGIN).contentType(MediaType.APPLICATION_JSON)
-				.content(json.writeValueAsString(Map.of("email", email, "password", password)));
-	}
-
-	private String loginToken(String email, String password) throws Exception {
-		String body = body(mvc.perform(login(email, password)).andExpect(status().isOk()).andReturn());
-		return JsonPath.read(body, "$.accessToken");
-	}
-
 	// Cuerpo del 401 sin el timestamp, para comparar respuestas de intentos distintos
 	private Map<String, Object> failedLogin(String email, String password) throws Exception {
 		MvcResult result = mvc.perform(login(email, password))
 				.andExpectAll(apiError(HttpStatus.UNAUTHORIZED, "INVALID_CREDENTIALS", LOGIN))
 				.andReturn();
-		Map<String, Object> error = new LinkedHashMap<>(JsonPath.<Map<String, Object>>read(body(result), "$"));
+		Map<String, Object> error = new LinkedHashMap<>(jsonMap(body(result)));
 		error.remove("timestamp");
 		return error;
-	}
-
-	private static String bearer(String token) {
-		return "Bearer " + token;
-	}
-
-	private static String body(MvcResult result) throws Exception {
-		return result.getResponse().getContentAsString(StandardCharsets.UTF_8);
-	}
-
-	private static Iterable<String> keys(String body) {
-		return JsonPath.<Map<String, Object>>read(body, "$").keySet();
-	}
-
-	private static ResultMatcher[] apiError(HttpStatus status, String code, String path) {
-		return new ResultMatcher[] {
-				status().is(status.value()),
-				content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON),
-				jsonPath("$.timestamp").value(org.hamcrest.Matchers.matchesPattern("\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}")),
-				jsonPath("$.status").value(status.value()),
-				jsonPath("$.error").value(status.getReasonPhrase()),
-				jsonPath("$.code").value(code),
-				jsonPath("$.message").isNotEmpty(),
-				jsonPath("$.path").value(path),
-				jsonPath("$.details").isArray(),
-				result -> assertThat(keys(body(result))).containsExactlyInAnyOrder(ERROR_KEYS) };
 	}
 
 }

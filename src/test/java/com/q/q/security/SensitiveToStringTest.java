@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import org.junit.jupiter.api.Test;
 
+import com.q.q.dto.request.ChangePasswordRequest;
 import com.q.q.dto.request.LoginRequest;
 import com.q.q.dto.request.RegisterRequest;
 import com.q.q.dto.response.AuthResponse;
@@ -40,6 +41,7 @@ class SensitiveToStringTest {
 		assertThat(new RegisterRequest("Ana", "ana@mail.test", PASSWORD, null).toString()).doesNotContain(PASSWORD);
 		assertThat(new LoginRequest("ana@mail.test", PASSWORD).toString()).doesNotContain(PASSWORD);
 		assertThat(new AuthResponse(TOKEN, "Bearer", 3600).toString()).doesNotContain(TOKEN);
+		assertThat(new ChangePasswordRequest(PASSWORD, "clave-nueva-2").toString()).doesNotContain(PASSWORD, "clave-nueva-2");
 	}
 
 	@Test

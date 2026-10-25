@@ -1,7 +1,5 @@
 package com.q.q.config;
 
-import java.nio.charset.StandardCharsets;
-
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -12,6 +10,7 @@ import org.springframework.util.StringUtils;
 import com.q.q.entity.User;
 import com.q.q.entity.enums.Role;
 import com.q.q.repository.UserRepository;
+import com.q.q.security.PasswordPolicy;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -38,7 +37,7 @@ public class AdminBootstrap implements ApplicationRunner {
 			return;
 		}
 		String password = admin.password();
-		if (password.length() < 8 || password.getBytes(StandardCharsets.UTF_8).length > 72) {   // RN-11
+		if (password.length() < PasswordPolicy.MIN_LENGTH || PasswordPolicy.exceedsBcryptLimit(password)) {   // RN-11
 			log.warn("ADMIN_PASSWORD no cumple RN-11 (8 a 72 caracteres, máximo 72 bytes): no se crea el administrador inicial");
 			return;
 		}
