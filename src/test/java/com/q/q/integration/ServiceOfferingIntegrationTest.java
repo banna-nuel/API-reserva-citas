@@ -32,7 +32,6 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
@@ -407,16 +406,6 @@ class ServiceOfferingIntegrationTest extends IntegrationTestSupport {
 	// JSON escrito a mano: el número de durationMinutes viaja exactamente como se escribe ("30.0" incluido)
 	private static String rawServiceJson(String name, String durationMinutes) {
 		return "{\"name\":\"" + name + "\",\"durationMinutes\":" + durationMinutes + ",\"price\":1000}";
-	}
-
-	private static MockHttpServletRequestBuilder authorized(MockHttpServletRequestBuilder request, String token) {
-		return token == null ? request : request.header(HttpHeaders.AUTHORIZATION, bearer(token));
-	}
-
-	// Un String se envía tal cual (permite JSON inválido); cualquier otro objeto se serializa
-	private MockHttpServletRequestBuilder withJson(MockHttpServletRequestBuilder request, String token, Object requestBody) {
-		return authorized(request, token).contentType(MediaType.APPLICATION_JSON)
-				.content(requestBody instanceof String raw ? raw : jsonBody(requestBody));
 	}
 
 	private Long createService(String adminToken, String name) throws Exception {
