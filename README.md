@@ -970,7 +970,7 @@ Cada fase termina con algo que puedes **probar en Postman**. No avances a la sig
 Se hace en tres partes: Fase 4a (servicios), Fase 4b (profesionales) y Fase 4c (horario laboral, `WorkingHour`).
 
 - [x] CRUD de `ServiceOffering` (escritura solo ADMIN; lectura pública, paginada y con filtros)
-- [ ] `Professional`: alta (usuario + perfil) y asignación de servicios
+- [x] `Professional`: alta (usuario + perfil) y asignación de servicios
 - [ ] `WorkingHour`: GET/PUT validando que `fin > inicio` y que los bloques de un mismo día no se solapen
 
 **Listo cuando:** un CLIENT recibe 403 en los endpoints de ADMIN y un ADMIN puede armar el catálogo completo.
