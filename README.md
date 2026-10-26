@@ -551,6 +551,7 @@ Define el contrato **antes** de programar. Esta sección es la fuente de verdad:
 - Autenticación: cabecera `Authorization: Bearer <token>`.
 - Paginación y orden: `?page=0&size=20&sort=startTime,desc` (máximo `size=100`).
 - Filtros como parámetros de consulta: `?status=CONFIRMED&from=2026-11-01&to=2026-11-30`.
+- Números enteros en el body (`durationMinutes`, ids…): un valor con decimales, aunque sea `.0` (p. ej. `30.5` o `30.0`), da `400 MALFORMED_REQUEST`; no se redondea ni se trunca. Los importes (`price`) sí llevan decimales.
 
 | Código | Cuándo |
 |---|---|
@@ -824,7 +825,7 @@ En errores de validación (`400`), `details` lista los campos: `[{ "field": "ema
 | `BadRequestException` (p. ej. `sort` por un campo no permitido) | 400 | `INVALID_SORT` |
 | `MethodArgumentNotValidException` | 400 | `VALIDATION_ERROR` |
 | `HandlerMethodValidationException` (restricciones en `@RequestParam`/`@PathVariable`) | 400 | `VALIDATION_ERROR` |
-| `HttpMessageNotReadableException` (cuerpo ausente o JSON mal formado) | 400 | `MALFORMED_REQUEST` |
+| `HttpMessageNotReadableException` (cuerpo ausente, JSON mal formado o un valor de otro tipo, p. ej. un decimal donde va un entero) | 400 | `MALFORMED_REQUEST` |
 | `MethodArgumentTypeMismatchException` (p. ej. texto donde va un número) | 400 | `INVALID_PARAMETER` |
 | `MissingServletRequestParameterException` | 400 | `MISSING_PARAMETER` |
 | `AuthenticationException` (login con email o clave incorrectos, o usuario inactivo) | 401 | `INVALID_CREDENTIALS` |
@@ -847,7 +848,7 @@ Cada fase termina con algo que puedes **probar en Postman**. No avances a la sig
 - [x] Crear repositorio Git (`main` + `develop`) y `.gitignore`
 - [x] Instalar las herramientas de la sección 3
 - [x] Definir el paquete base (`com.q.q`) y la zona horaria
-- [ ] Crear en Postman la colección `Citas API` y el environment `local` (`baseUrl = http://localhost:8080/api/v1`)
+- [x] Crear en Postman la colección `Citas API` y el environment `local` (`baseUrl = http://localhost:8080/api/v1`)
 
 **Listo cuando:** `java -version`, `docker --version` y `git --version` responden bien.
 
@@ -873,7 +874,7 @@ Cada fase termina con algo que puedes **probar en Postman**. No avances a la sig
 - [x] `AuthUser`, `CustomUserDetailsService`, `JwtService`, `JwtAuthenticationFilter`, `SecurityConfig` (sección 11)
 - [x] `POST /auth/register`, `POST /auth/login`, `GET /users/me`
 - [x] `AdminBootstrap`: un `ApplicationRunner` que crea el primer ADMIN con `app.admin.*` si no existe
-- [ ] Postman: Register → Login (guarda el token) → Me
+- [x] Postman: Register → Login (guarda el token) → Me
 
 **Listo cuando:** sin token → 401, con token → 200, y la contraseña nunca aparece en una respuesta.
 
@@ -932,7 +933,7 @@ Cada fase termina con algo que puedes **probar en Postman**. No avances a la sig
 4. DTOs `record` con validaciones.
 5. Servicio: reglas de negocio, `@Transactional`, excepciones propias, conversión a DTO.
 6. Controlador delgado: `@Valid`, código HTTP correcto, `@PreAuthorize`.
-7. Regla en `SecurityConfig` solo si el endpoint es público.
+7. Regla en `SecurityConfig` si el endpoint es público o solo-ADMIN.
 8. Pruebas: unitaria del servicio (caso feliz + cada error) y del controlador.
 9. Request en Postman con tests automáticos (feliz + 400/401/403/404/409).
 10. Anotaciones OpenAPI, commit (`feat: ...`) y pull request.
