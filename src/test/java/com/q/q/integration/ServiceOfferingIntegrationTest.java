@@ -234,6 +234,23 @@ class ServiceOfferingIntegrationTest extends IntegrationTestSupport {
 				Arguments.of("price", new BigDecimal("100000000.00")));          // 9 dígitos enteros: no cabe en DECIMAL(10,2)
 	}
 
+	// spring.jackson.deserialization.accept-float-as-int=false: un decimal no se trunca a entero
+	@Test
+	void decimalDurationIsRejectedInsteadOfTruncated() throws Exception {
+		String admin = adminToken();
+		String name = uniqueName("Decimal");
+
+		for (String duration : new String[] { "30.5", "30.0" }) {
+			mvc.perform(withJson(post(SERVICES), admin, rawServiceJson(name, duration)))
+					.andExpectAll(apiError(HttpStatus.BAD_REQUEST, "MALFORMED_REQUEST", SERVICES));
+		}
+		assertThat(serviceOfferings.existsByNameIgnoreCase(name)).isFalse();
+
+		mvc.perform(withJson(post(SERVICES), admin, rawServiceJson(name, "30")))
+				.andExpect(status().isCreated())
+				.andExpect(jsonPath("$.durationMinutes").value(30));
+	}
+
 	@Test
 	void boundaryValuesAreAcceptedAndPutUsesTheSameRules() throws Exception {
 		String admin = adminToken();
@@ -385,6 +402,11 @@ class ServiceOfferingIntegrationTest extends IntegrationTestSupport {
 
 	private static Map<String, Object> validBody(String name) {
 		return serviceBody(name, "Servicio de prueba", 30, new BigDecimal("80000.00"));
+	}
+
+	// JSON escrito a mano: el número de durationMinutes viaja exactamente como se escribe ("30.0" incluido)
+	private static String rawServiceJson(String name, String durationMinutes) {
+		return "{\"name\":\"" + name + "\",\"durationMinutes\":" + durationMinutes + ",\"price\":1000}";
 	}
 
 	private static MockHttpServletRequestBuilder authorized(MockHttpServletRequestBuilder request, String token) {
