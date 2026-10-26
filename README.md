@@ -590,11 +590,14 @@ El email y el rol de un usuario no se cambian por estos endpoints: el email es e
 
 | Método | Ruta | Descripción | Acceso | Éxito |
 |---|---|---|---|---|
-| GET | `/services` | Listar (paginado; `?active=true&q=texto`) | Público | 200 |
-| GET | `/services/{id}` | Detalle | Público | 200 |
+| GET | `/services` | Listar (paginado; `?q=texto&page=&size=&sort=`; el ADMIN también `?active=`) | Público | 200 |
+| GET | `/services/{id}` | Detalle (uno inactivo da 404, salvo al ADMIN) | Público | 200 |
 | POST | `/services` | Crear | ADMIN | 201 |
-| PUT | `/services/{id}` | Actualizar | ADMIN | 200 |
-| DELETE | `/services/{id}` | Desactivar (borrado lógico) | ADMIN | 204 |
+| PUT | `/services/{id}` | Reemplazar `name`, `description`, `durationMinutes` y `price` (no cambia `active`) | ADMIN | 200 |
+| DELETE | `/services/{id}` | Desactivar (borrado lógico, RN-10; idempotente) | ADMIN | 204 |
+| PATCH | `/services/{id}/active` | Activar/desactivar (`{ "active": true }`) | ADMIN | 200 |
+
+Sin token o con un rol distinto de ADMIN, las lecturas solo muestran servicios activos.
 
 **Profesionales**
 
@@ -704,7 +707,58 @@ Activar o desactivar un usuario → `PATCH /api/v1/users/{id}/active` (ADMIN):
 { "active": false }
 ```
 
-→ `200` con el `UserResponse` actualizado. El usuario desactivado pierde el acceso en su siguiente petición (su token responde `401`) y ya no puede iniciar sesión. Errores: `400 VALIDATION_ERROR` (falta `active`) · `401 AUTHENTICATION_REQUIRED` · `403 ACCESS_DENIED` · `404 RESOURCE_NOT_FOUND` · `422 CANNOT_DEACTIVATE_SELF` (un admin no puede desactivarse a sí mismo).
+→ `200` con el `UserResponse` actualizado. El usuario desactivado pierde el acceso en su siguiente petición (su token responde `401`) y ya no puede iniciar sesión; si se reactiva antes de que expiren, sus tokens anteriores vuelven a servir (limitación conocida, ver sección 18). Errores: `400 VALIDATION_ERROR` (falta `active`) · `401 AUTHENTICATION_REQUIRED` · `403 ACCESS_DENIED` · `404 RESOURCE_NOT_FOUND` · `422 CANNOT_DEACTIVATE_SELF` (un admin no puede desactivarse a sí mismo).
+
+Un admin sí puede desactivar a otro admin: como nadie puede desactivarse a sí mismo, siempre queda al menos un admin activo.
+
+`GET /users` y `PATCH /users/{id}/active` exigen ADMIN también por URL en `SecurityConfig` (además de `@PreAuthorize` y de la comprobación en el servicio): quien no es ADMIN recibe `403` antes de que se validen los parámetros o el body.
+
+**Servicios**
+
+Crear un servicio → `POST /api/v1/services` (ADMIN):
+
+```json
+{ "name": "Consulta general", "description": "Valoración inicial", "durationMinutes": 30, "price": 80000.00 }
+```
+
+Respuesta `201` (con cabecera `Location: http://localhost:8080/api/v1/services/1`):
+
+```json
+{
+  "id": 1,
+  "name": "Consulta general",
+  "description": "Valoración inicial",
+  "durationMinutes": 30,
+  "price": 80000.00,
+  "active": true,
+  "createdAt": "2026-10-25T10:15:30.123456"
+}
+```
+
+Reglas del body (las mismas en `PUT`):
+
+- `name`: obligatorio. Se quitan los espacios del principio y del final, y lo que queda debe tener de 1 a 100 caracteres. Es único sin distinguir mayúsculas (ni tildes, por la colación `utf8mb4_0900_ai_ci` de MySQL): `consulta general` o `  Consulta General  ` chocan con `Consulta general` → `409 SERVICE_NAME_ALREADY_EXISTS`.
+- `description`: opcional, máx. 500 caracteres. Se quitan los espacios sobrantes; si queda vacía se guarda como `null`.
+- `durationMinutes`: obligatorio, entero de 1 a 480 (8 horas).
+- `price`: obligatorio, `>= 0`, con máximo 2 decimales y 8 dígitos enteros (cabe en `DECIMAL(10,2)`: hasta `99999999.99`). Se devuelve siempre con 2 decimales. Nunca se usa `double`.
+- `id`, `active` y cualquier otro campo se ignoran: un servicio nuevo nace activo y su estado solo cambia con `DELETE` o `PATCH /active`.
+
+Errores: `400 VALIDATION_ERROR` · `401 AUTHENTICATION_REQUIRED` · `403 ACCESS_DENIED` (no es ADMIN; se responde antes de validar el body) · `409 SERVICE_NAME_ALREADY_EXISTS`.
+
+Listar servicios → `GET /api/v1/services?q=consulta&page=0&size=20&sort=price,asc` (público) → `200` con el mismo formato paginado que `GET /users` (`content`, `page`, `size`, `totalElements`, `totalPages`), donde cada elemento es un servicio como el de arriba.
+
+- Sin token, o con el token de un CLIENT o PROFESSIONAL, solo aparecen los servicios activos y el parámetro `active` se ignora. El ADMIN ve todos y puede filtrar con `active=true` o `active=false`. Un token inválido o expirado no da `401` en las lecturas: la petición sigue como anónima.
+- `q` (opcional) busca dentro del nombre sin distinguir mayúsculas; `%` y `_` se buscan como texto literal.
+- `size` vale 20 por defecto y 100 como máximo (un valor mayor se recorta a 100). `sort` solo acepta `id`, `name`, `price`, `durationMinutes` y `createdAt`, con `,asc` o `,desc`; otro campo → `400 INVALID_SORT`. Sin `sort` se ordena por `id` ascendente, y `id` se agrega siempre como desempate.
+- `active` con un valor que no sea booleano (p. ej. `active=quizas`) → `400 INVALID_PARAMETER`, para cualquier rol.
+
+Detalle → `GET /api/v1/services/{id}` (público) → `200` con el servicio. Si no existe, o si está inactivo y quien pregunta no es ADMIN → `404 RESOURCE_NOT_FOUND`.
+
+Actualizar → `PUT /api/v1/services/{id}` (ADMIN) con el mismo body que la creación → `200` con el servicio actualizado. Reemplaza `name`, `description` (si se omite, queda vacía), `durationMinutes` y `price`; no cambia `active`, así que también sirve para editar un servicio inactivo. Puede conservar su propio nombre aunque cambie las mayúsculas. Cambiar el precio no altera las citas ya reservadas (RN-09). Errores: los de la creación y `404 RESOURCE_NOT_FOUND`.
+
+Desactivar → `DELETE /api/v1/services/{id}` (ADMIN) → `204` sin cuerpo. Es un borrado lógico (RN-10): el servicio deja de aparecer en las lecturas públicas. Es idempotente: sobre uno ya inactivo también responde `204`. Errores: `401 AUTHENTICATION_REQUIRED` · `403 ACCESS_DENIED` · `404 RESOURCE_NOT_FOUND`.
+
+Activar o desactivar → `PATCH /api/v1/services/{id}/active` (ADMIN) con `{ "active": true }` → `200` con el servicio actualizado. Errores: `400 VALIDATION_ERROR` (falta `active`) · `401 AUTHENTICATION_REQUIRED` · `403 ACCESS_DENIED` · `404 RESOURCE_NOT_FOUND`.
 
 **Citas y disponibilidad**
 
@@ -764,7 +818,7 @@ En errores de validación (`400`), `details` lista los campos: `[{ "field": "ema
 | Excepción | HTTP | `code` de ejemplo |
 |---|---|---|
 | `ResourceNotFoundException` | 404 | `RESOURCE_NOT_FOUND` |
-| `ConflictException` | 409 | `SLOT_NOT_AVAILABLE`, `CLIENT_OVERLAP`, `EMAIL_ALREADY_USED`, `INVALID_STATUS_TRANSITION` |
+| `ConflictException` | 409 | `SLOT_NOT_AVAILABLE`, `CLIENT_OVERLAP`, `EMAIL_ALREADY_USED`, `SERVICE_NAME_ALREADY_EXISTS`, `INVALID_STATUS_TRANSITION` |
 | `BusinessRuleException` | 422 | `OUTSIDE_WORKING_HOURS`, `TOO_SOON`, `TOO_FAR`, `SERVICE_NOT_OFFERED`, `CANCELLATION_WINDOW_PASSED`, `INVALID_CURRENT_PASSWORD`, `PASSWORD_UNCHANGED`, `CANNOT_DEACTIVATE_SELF` |
 | `ForbiddenOperationException` | 403 | `FORBIDDEN_OPERATION` |
 | `BadRequestException` (p. ej. `sort` por un campo no permitido) | 400 | `INVALID_SORT` |
@@ -832,7 +886,7 @@ Cada fase termina con algo que puedes **probar en Postman**. No avances a la sig
 **Listo cuando:** cada endpoint responde bien con el rol permitido y falla con uno no permitido (un CLIENT recibe 403 en los de ADMIN), y tras cambiar la contraseña solo funciona el login con la nueva.
 
 ### Fase 4 — Catálogo
-- [ ] CRUD de `ServiceOffering` (escritura solo ADMIN; lectura pública, paginada y con filtros)
+- [x] CRUD de `ServiceOffering` (escritura solo ADMIN; lectura pública, paginada y con filtros)
 - [ ] `Professional`: alta (usuario + perfil) y asignación de servicios
 - [ ] `WorkingHour`: GET/PUT validando que `fin > inicio` y que los bloques de un mismo día no se solapen
 
@@ -1562,7 +1616,10 @@ jobs:
 ## 18. Mejoras futuras
 
 - Refresh tokens y cierre de sesión (lista de tokens revocados).
-- **Limitación conocida:** al cambiar la contraseña, los JWT emitidos antes siguen siendo válidos hasta expirar. Solución posible: guardar `password_changed_at` en `users` y rechazar los tokens con `iat` anterior (o incluir una versión de credenciales en el token). Desactivar un usuario, en cambio, sí corta el acceso de inmediato.
+- **Limitaciones conocidas de los JWT:**
+  - Al cambiar la contraseña, los JWT emitidos antes siguen siendo válidos hasta expirar.
+  - Desactivar un usuario sí corta el acceso de inmediato, pero si se reactiva antes de que expiren, los tokens emitidos antes de la desactivación vuelven a servir.
+  - Mejora futura para ambas: una columna `tokens_valid_after` en `users` (o una versión de token que viaje en el JWT) que se actualice al cambiar la contraseña y al desactivar, y rechazar los tokens con `iat` anterior.
 - Notificaciones por email/WhatsApp y recordatorios programados (`@Scheduled`).
 - Bloqueos de agenda: vacaciones, festivos y ausencias (`time_off`).
 - Citas recurrentes, lista de espera y multi-sede.

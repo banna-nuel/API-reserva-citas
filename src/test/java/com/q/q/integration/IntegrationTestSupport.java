@@ -35,6 +35,7 @@ abstract class IntegrationTestSupport {
 	protected static final String PASSWORD = "clave-segura-123";
 	protected static final String[] ERROR_KEYS = { "timestamp", "status", "error", "code", "message", "path", "details" };
 	protected static final String[] USER_KEYS = { "id", "fullName", "email", "phone", "role", "active", "createdAt" };
+	protected static final String[] PAGE_KEYS = { "content", "page", "size", "totalElements", "totalPages" };
 	private static final AtomicInteger SEQUENCE = new AtomicInteger();
 
 	@Autowired

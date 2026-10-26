@@ -40,6 +40,14 @@ public class SecurityConfig {
 			.sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
 			.exceptionHandling(e -> e.authenticationEntryPoint(entryPoint).accessDeniedHandler(deniedHandler))
 			.authorizeHttpRequests(auth -> auth
+				// Endpoints solo-ADMIN: se cortan aquí con 403 antes de validar parámetros o body
+				// (además llevan @PreAuthorize y la comprobación en el servicio)
+				.requestMatchers(HttpMethod.GET, "/api/v1/users").hasRole("ADMIN")
+				.requestMatchers(HttpMethod.PATCH, "/api/v1/users/*/active").hasRole("ADMIN")
+				.requestMatchers(HttpMethod.POST, "/api/v1/services").hasRole("ADMIN")
+				.requestMatchers(HttpMethod.PUT, "/api/v1/services/*").hasRole("ADMIN")
+				.requestMatchers(HttpMethod.DELETE, "/api/v1/services/*").hasRole("ADMIN")
+				.requestMatchers(HttpMethod.PATCH, "/api/v1/services/*/active").hasRole("ADMIN")
 				.requestMatchers("/api/v1/auth/**", "/actuator/health/**").permitAll()
 				.requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
 				.requestMatchers(HttpMethod.GET, "/api/v1/services/**", "/api/v1/professionals/**").permitAll()

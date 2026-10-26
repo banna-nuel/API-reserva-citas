@@ -16,7 +16,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.q.q.dto.request.ChangePasswordRequest;
 import com.q.q.dto.request.UpdateProfileRequest;
-import com.q.q.dto.request.UpdateUserActiveRequest;
+import com.q.q.dto.request.UpdateActiveRequest;
 import com.q.q.dto.response.PageResponse;
 import com.q.q.dto.response.UserResponse;
 import com.q.q.entity.enums.Role;
@@ -60,7 +60,7 @@ public class UserController {
 
 	@PatchMapping("/{id}/active")
 	@PreAuthorize("hasRole('ADMIN')")
-	public UserResponse setActive(@PathVariable Long id, @Valid @RequestBody UpdateUserActiveRequest request,
+	public UserResponse setActive(@PathVariable Long id, @Valid @RequestBody UpdateActiveRequest request,
 			@AuthenticationPrincipal AuthUser principal) {
 		return userService.setActive(id, request.active(), principal);
 	}
