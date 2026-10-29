@@ -61,6 +61,11 @@ public class Professional {
 		return active && user.isActive();
 	}
 
+	// RN-05. Compara por id: las entidades no redefinen equals
+	public boolean offers(ServiceOffering service) {
+		return services.stream().anyMatch(s -> s.getId().equals(service.getId()));
+	}
+
 	@Override
 	public String toString() {                  // sin el usuario: no arrastra datos personales a un log
 		return "Professional[id=" + id + ", active=" + active + "]";

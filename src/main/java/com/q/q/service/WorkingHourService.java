@@ -1,5 +1,6 @@
 package com.q.q.service;
 
+import java.time.DayOfWeek;
 import java.util.List;
 
 import org.springframework.stereotype.Service;
@@ -68,6 +69,13 @@ public class WorkingHourService {
 				.map(block -> toEntity(professional, block))
 				.toList());
 		return mapper.toResponse(professionalId, saved);
+	}
+
+	// Tramos de trabajo de un día, ordenados y con los bloques contiguos fusionados (RN-03). Los usan la
+	// disponibilidad y, en la Fase 6, la comprobación de que una cita cabe en la jornada (fits)
+	@Transactional(readOnly = true)
+	public List<TimeRange> workingRanges(Long professionalId, DayOfWeek day) {
+		return TimeRange.merge(workingHours.findByProfessionalIdAndDayOfWeek(professionalId, day));
 	}
 
 	private static WorkingHour toEntity(Professional professional, WorkingHourBlockRequest block) {

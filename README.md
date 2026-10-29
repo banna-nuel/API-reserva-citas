@@ -109,7 +109,7 @@ Los **clientes** consultan servicios, profesionales y horarios libres, y reserva
 |---|---|
 | RN-01 | La duración de la cita la define el servicio: `fin = inicio + duración`. |
 | RN-02 | Un profesional no puede tener dos citas activas (`PENDING`/`CONFIRMED`) solapadas. Hay solape si `nuevoInicio < existenteFin` **y** `nuevoFin > existenteInicio`. |
-| RN-03 | La cita debe caber completa dentro de un bloque del horario laboral del profesional para ese día de la semana. |
+| RN-03 | La cita debe caber completa dentro de un bloque del horario laboral del profesional para ese día de la semana. Los bloques contiguos (el fin de uno es el inicio del siguiente, p. ej. `09:00-12:00` y `12:00-14:00`) cuentan como uno solo: la cita puede empezar en uno y terminar en el otro. Los horarios se ofrecen anclados al inicio de cada tramo, cada `slot-step-minutes` (un tramo que empieza a las 09:15 ofrece 09:15, 09:45…), y una cita debe empezar exactamente en uno de ellos. |
 | RN-04 | Se reserva con una anticipación mínima (`min-notice-minutes`) y como máximo `max-days-ahead` días hacia adelante. |
 | RN-05 | Servicio y profesional deben estar activos, y el profesional debe ofrecer ese servicio. |
 | RN-06 | Un cliente no puede tener dos citas activas solapadas, ni siquiera con profesionales distintos. |
@@ -612,9 +612,9 @@ Sin token o con un rol distinto de ADMIN, las lecturas solo muestran servicios a
 | PUT | `/professionals/{id}/services` | Reemplazar los servicios que ofrece (`{ "serviceIds": [1, 2] }`) | ADMIN | 200 |
 | GET | `/professionals/{id}/working-hours` | Ver horario laboral (bloques ordenados por día y hora) | Público | 200 |
 | PUT | `/professionals/{id}/working-hours` | Reemplazar todo el horario laboral (`{ "blocks": [...] }`) | ADMIN o el propio profesional | 200 |
-| GET | `/professionals/{id}/availability?date=&serviceId=` | Horarios libres de un día | Público | 200 |
+| GET | `/professionals/{id}/availability?date=&serviceId=` | Horarios libres de un día para un servicio (`date` en `YYYY-MM-DD`; ambos obligatorios) | Público | 200 |
 
-Sin token o con un rol distinto de ADMIN, las lecturas solo muestran profesionales con el perfil **y** el usuario activos y, de cada uno, sus servicios activos; además omiten `userId`, `email`, `phone`, `active`, `userActive` y `createdAt`. `availability` llega en la Fase 5.
+Sin token o con un rol distinto de ADMIN, las lecturas solo muestran profesionales con el perfil **y** el usuario activos y, de cada uno, sus servicios activos; además omiten `userId`, `email`, `phone`, `active`, `userActive` y `createdAt`. `availability` responde `404` si el perfil o el usuario están inactivos para todos, también para el ADMIN.
 
 **Citas**
 
@@ -920,7 +920,7 @@ Respuesta `201` (con cabecera `Location: /api/v1/appointments/41`):
 }
 ```
 
-Disponibilidad → `GET /api/v1/professionals/2/availability?date=2026-11-05&serviceId=1`:
+Disponibilidad → `GET /api/v1/professionals/2/availability?date=2026-11-05&serviceId=1` (público; el token es opcional) → `200`:
 
 ```json
 {
@@ -934,6 +934,31 @@ Disponibilidad → `GET /api/v1/professionals/2/availability?date=2026-11-05&ser
   ]
 }
 ```
+
+Con el horario de la sección 12.3, la lista sigue hasta `11:30-12:00` y retoma en `14:00-14:30`. Sigue el algoritmo de la sección 10.5:
+
+- Cada slot dura lo que el servicio: `end = start + durationMinutes` (RN-01). Los inicios avanzan cada `app.booking.slot-step-minutes` minutos (30 por defecto), contados desde el inicio de cada tramo de la jornada. Un slot solo aparece si cabe completo antes del fin del tramo (RN-03).
+- Los bloques contiguos del horario cuentan como un solo tramo (RN-03): con `09:00-10:00` y `10:00-11:00`, un servicio de 60 minutos puede empezar a las `09:30`.
+- No aparece ningún slot que se solape con una cita `PENDING` o `CONFIRMED` del profesional (RN-02: `inicio < finCita` y `fin > inicioCita`).
+  - Una cita que termina a las `10:00` no bloquea el slot de las `10:00`.
+  - Las citas `CANCELLED`, `COMPLETED` y `NO_SHOW` no ocupan.
+  - También cuentan las citas que cruzan la medianoche desde el día anterior.
+- Solo aparecen los slots que empiezan entre `ahora + min-notice-minutes` (60 por defecto) y `ahora + max-days-ahead` días (60 por defecto), ambos incluidos (RN-04).
+  - Una fecha pasada o más allá de ese tope no es un error: `200` con `"slots": []`.
+  - Lo mismo pasa con un día sin horario o en el que el servicio no cabe en ningún tramo.
+- `slots` va ordenado por `start`. Las horas son las locales del negocio (`app.timezone`) y no llevan zona.
+- La respuesta solo trae horarios libres, nunca las citas ni quién las reservó.
+
+Orden de comprobaciones (gana la primera que falla):
+
+1. Parámetros (los valida Spring antes de llegar al servicio):
+   - falta `date` o `serviceId`, o llega vacío → `400 MISSING_PARAMETER`;
+   - `date` no es una fecha `YYYY-MM-DD` válida (p. ej. `2026-11-5` o `2026-13-01`), o `serviceId` o `{id}` no son un número → `400 INVALID_PARAMETER`.
+2. El profesional no existe, o su perfil o su usuario están inactivos → `404 RESOURCE_NOT_FOUND`. Vale para todos, también para el ADMIN: a diferencia del detalle, aquí se consulta para reservar, y con un profesional inactivo no se puede.
+3. El servicio no existe o está inactivo → `404 RESOURCE_NOT_FOUND` (también para el ADMIN).
+4. El profesional no ofrece ese servicio → `422 SERVICE_NOT_OFFERED` (RN-05).
+
+Errores: `400 MISSING_PARAMETER` · `400 INVALID_PARAMETER` · `404 RESOURCE_NOT_FOUND` · `422 SERVICE_NOT_OFFERED`.
 
 ### 8.4 Formato de error (siempre el mismo)
 
@@ -950,6 +975,8 @@ Disponibilidad → `GET /api/v1/professionals/2/availability?date=2026-11-05&ser
 ```
 
 En errores de validación (`400`), `details` lista los campos: `[{ "field": "email", "message": "debe ser un correo válido" }]`. `422 INVALID_SERVICE_IDS` y `422 WORKING_HOURS_OVERLAP` también lo usan, con un elemento por cada id inválido o por cada par de bloques en conflicto.
+
+`422 SERVICE_NOT_OFFERED` (RN-05): el profesional no ofrece el servicio pedido. Lo devuelven la disponibilidad (Fase 5) y la creación de citas (Fase 6).
 
 | Excepción | HTTP | `code` de ejemplo |
 |---|---|---|
@@ -1032,9 +1059,17 @@ Se hace en tres partes: Fase 4a (servicios), Fase 4b (profesionales) y Fase 4c (
 **Listo cuando:** un CLIENT recibe 403 en los endpoints de ADMIN y un ADMIN puede armar el catálogo completo.
 
 ### Fase 5 — Disponibilidad
-- [ ] `AvailabilityService` con el algoritmo de la sección 10.5
-- [ ] `GET /professionals/{id}/availability`
-- [ ] Pruebas unitarias: día sin horario, bloques con pausa, citas existentes, hoy con hora actual
+- [x] `AvailabilityService` con el algoritmo de la sección 10.5
+- [x] `GET /professionals/{id}/availability`
+- [x] Pruebas unitarias: día sin horario, bloques con pausa, citas existentes, hoy con hora actual
+
+Para saber qué horas están ocupadas, se adelantaron de la Fase 6 tres piezas mínimas:
+
+- la entidad `Appointment`;
+- el enum `AppointmentStatus`, sin `canTransitionTo`;
+- en `AppointmentRepository`, solo la consulta de citas activas (`PENDING` y `CONFIRMED`) de un profesional que solapan un rango.
+
+`canTransitionTo`, los demás métodos del repositorio y todo lo demás de las citas siguen en la Fase 6.
 
 **Listo cuando:** los horarios devueltos no incluyen horas ocupadas, pasadas ni fuera de jornada.
 
@@ -1266,18 +1301,26 @@ Para cancelar, confirmar o completar: carga la cita, comprueba pertenencia (RN-1
 
 ```
 disponibilidad(profesionalId, fecha, servicioId):
-  1. dur  = duración del servicio;  paso = app.booking.slot-step-minutes
-  2. bloques  = horario laboral del profesional para fecha.dayOfWeek     (puede haber varios por día)
-  3. ocupadas = citas activas del profesional entre fecha 00:00 y fecha+1 00:00
-  4. para cada bloque:
-        t = bloque.inicio
-        mientras t + dur <= bloque.fin:
-            slot = [fecha+t, fecha+t+dur]
-            si slot.inicio >= ahora + min-notice  Y  no solapa con ninguna de `ocupadas`:
-                agregar slot
+  1. dur   = duración del servicio;  paso = app.booking.slot-step-minutes
+     ahora = LocalDateTime.now(clock)                                     (nunca now() sin el Clock)
+     desde = ahora + min-notice-minutes;  hasta = ahora + max-days-ahead días   (RN-04)
+  2. si fecha < desde.fecha  O  fecha > hasta.fecha:  devolver []        (fecha pasada o tras el tope: 200 vacío)
+  3. tramos = horario laboral del profesional para fecha.dayOfWeek, ordenado y con los bloques
+             contiguos fusionados: 09:00-12:00 + 12:00-14:00 → 09:00-14:00      (RN-03)
+  4. ocupadas = citas PENDING/CONFIRMED del profesional con
+                inicio < (fecha+1) 00:00  Y  fin > fecha 00:00             (una sola consulta; incluye las
+                                                                            que cruzan la medianoche)
+  5. para cada tramo:
+        t = fecha + tramo.inicio
+        mientras t + dur <= fecha + tramo.fin:
+            si desde <= t <= hasta  Y  ninguna ocupada cumple  t < ocupada.fin Y t + dur > ocupada.inicio  (RN-02):
+                agregar el slot [t, t + dur]
             t = t + paso
-  5. devolver los slots ordenados
+  6. devolver los slots (salen ordenados: los tramos van en orden y no se solapan)
 ```
+
+- Se recorre con `LocalDateTime`, no con `LocalTime`: con `LocalTime`, `23:30 + 60 min` "da la vuelta" a `00:30` y el slot parecería caber.
+- La fusión de bloques contiguos vive en `TimeRange.merge(...)`, que se usa a través de `WorkingHourService.workingRanges(profesionalId, día)`. La Fase 6 la reutiliza en `fits()` para RN-03.
 
 Los `LocalDate` recibidos como parámetro necesitan `@RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date`; sin la anotación, Spring espera un formato dependiente del idioma.
 
