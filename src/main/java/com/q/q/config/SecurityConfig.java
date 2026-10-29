@@ -54,6 +54,8 @@ public class SecurityConfig {
 				.requestMatchers(HttpMethod.PATCH, "/api/v1/professionals/*/active").hasRole("ADMIN")
 				// Acceso mixto: un CLIENT recibe 403 antes de validar el body; que sea el dueño lo comprueba el servicio
 				.requestMatchers(HttpMethod.PUT, "/api/v1/professionals/*/working-hours").hasAnyRole("ADMIN", "PROFESSIONAL")
+				// Reservar: un PROFESSIONAL recibe 403 antes de validar el body
+				.requestMatchers(HttpMethod.POST, "/api/v1/appointments").hasAnyRole("CLIENT", "ADMIN")
 				.requestMatchers("/api/v1/auth/**", "/actuator/health/**").permitAll()
 				.requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
 				.requestMatchers(HttpMethod.GET, "/api/v1/services/**", "/api/v1/professionals/**").permitAll()

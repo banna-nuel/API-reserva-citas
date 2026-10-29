@@ -53,11 +53,8 @@ public class AvailabilityService {
 
 	// Algoritmo de la sección 10.5
 	private List<AvailabilityResponse.Slot> freeSlots(Long professionalId, LocalDate date, int durationMinutes) {
-		AppProperties.Booking booking = props.booking();
-		LocalDateTime now = LocalDateTime.now(clock);
-		LocalDateTime earliest = now.plusMinutes(booking.minNoticeMinutes());       // RN-04: anticipación mínima
-		LocalDateTime latest = now.plusDays(booking.maxDaysAhead());               // RN-04: tope hacia adelante
-		if (date.isBefore(earliest.toLocalDate()) || date.isAfter(latest.toLocalDate())) {
+		BookingWindow window = BookingWindow.at(LocalDateTime.now(clock), props.booking());     // RN-04
+		if (date.isBefore(window.earliest().toLocalDate()) || date.isAfter(window.latest().toLocalDate())) {
 			return List.of();                        // fecha pasada o tras el tope: ningún slot cumpliría RN-04
 		}
 		List<TimeRange> ranges = workingHours.workingRanges(professionalId, date.getDayOfWeek());
@@ -70,25 +67,18 @@ public class AvailabilityService {
 
 		List<AvailabilityResponse.Slot> slots = new ArrayList<>();
 		for (TimeRange range : ranges) {                // ordenados y sin solapes: los slots salen en orden
-			LocalDateTime rangeEnd = date.atTime(range.end());
-			// LocalDateTime y no LocalTime: así 23:30 + 60 min no "da la vuelta" a las 00:30
-			LocalDateTime start = date.atTime(range.start());
-			LocalDateTime end = start.plusMinutes(durationMinutes);
-			while (!end.isAfter(rangeEnd)) {
-				if (!start.isBefore(earliest) && !start.isAfter(latest) && isFree(busy, start, end)) {
-					slots.add(new AvailabilityResponse.Slot(start, end));
+			for (TimeSlot slot : range.candidateSlots(date, durationMinutes, props.booking().slotStepMinutes())) {
+				if (window.contains(slot.start()) && isFree(busy, slot)) {
+					slots.add(new AvailabilityResponse.Slot(slot.start(), slot.end()));
 				}
-				start = start.plusMinutes(booking.slotStepMinutes());
-				end = start.plusMinutes(durationMinutes);
 			}
 		}
 		return slots;
 	}
 
-	// RN-02: hay solape si inicio < finCita y fin > inicioCita; una cita que termina a las 10:00 deja libre el slot
-	// de las 10:00
-	private static boolean isFree(List<Appointment> busy, LocalDateTime start, LocalDateTime end) {
-		return busy.stream().noneMatch(a -> start.isBefore(a.getEndTime()) && end.isAfter(a.getStartTime()));
+	// RN-02: una cita que termina a las 10:00 deja libre el slot de las 10:00
+	private static boolean isFree(List<Appointment> busy, TimeSlot slot) {
+		return busy.stream().noneMatch(a -> slot.overlaps(a.getStartTime(), a.getEndTime()));
 	}
 
 }
