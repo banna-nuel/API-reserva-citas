@@ -1,5 +1,7 @@
 package com.q.q.service;
 
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -27,6 +29,26 @@ public record TimeRange(LocalTime start, LocalTime end) {
 			}
 		}
 		return merged;
+	}
+
+	// RN-03: [from, to) cabe completo en este tramo el día de from. Una cita que pasa de medianoche nunca cabe
+	public boolean fits(LocalDateTime from, LocalDateTime to) {
+		LocalDate day = from.toLocalDate();
+		return !from.isBefore(day.atTime(start)) && !to.isAfter(day.atTime(end));
+	}
+
+	// Sección 10.5: los horarios que el tramo ofrece en date, anclados a su inicio cada stepMinutes y que caben
+	// completos, antes de mirar citas y anticipación. Los comparten la disponibilidad y la creación de citas
+	public List<TimeSlot> candidateSlots(LocalDate date, int durationMinutes, int stepMinutes) {
+		List<TimeSlot> slots = new ArrayList<>();
+		LocalDateTime rangeEnd = date.atTime(end);
+		// LocalDateTime y no LocalTime: así 23:30 + 60 min no "da la vuelta" a las 00:30
+		LocalDateTime slotStart = date.atTime(start);
+		while (!slotStart.plusMinutes(durationMinutes).isAfter(rangeEnd)) {
+			slots.add(new TimeSlot(slotStart, slotStart.plusMinutes(durationMinutes)));
+			slotStart = slotStart.plusMinutes(stepMinutes);
+		}
+		return slots;
 	}
 
 }
