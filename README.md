@@ -1059,9 +1059,9 @@ Se hace en tres partes: Fase 4a (servicios), Fase 4b (profesionales) y Fase 4c (
 **Listo cuando:** un CLIENT recibe 403 en los endpoints de ADMIN y un ADMIN puede armar el catálogo completo.
 
 ### Fase 5 — Disponibilidad
-- [ ] `AvailabilityService` con el algoritmo de la sección 10.5
-- [ ] `GET /professionals/{id}/availability`
-- [ ] Pruebas unitarias: día sin horario, bloques con pausa, citas existentes, hoy con hora actual
+- [x] `AvailabilityService` con el algoritmo de la sección 10.5
+- [x] `GET /professionals/{id}/availability`
+- [x] Pruebas unitarias: día sin horario, bloques con pausa, citas existentes, hoy con hora actual
 
 Para saber qué horas están ocupadas, se adelantaron de la Fase 6 tres piezas mínimas:
 
