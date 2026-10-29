@@ -49,9 +49,11 @@ public class SecurityConfig {
 				.requestMatchers(HttpMethod.DELETE, "/api/v1/services/*").hasRole("ADMIN")
 				.requestMatchers(HttpMethod.PATCH, "/api/v1/services/*/active").hasRole("ADMIN")
 				.requestMatchers(HttpMethod.POST, "/api/v1/professionals").hasRole("ADMIN")
-				// Rutas exactas: PUT /professionals/{id}/working-hours admite también al propio profesional (Fase 4c)
+				// Rutas exactas: el horario laboral (abajo) admite también al propio profesional
 				.requestMatchers(HttpMethod.PUT, "/api/v1/professionals/*", "/api/v1/professionals/*/services").hasRole("ADMIN")
 				.requestMatchers(HttpMethod.PATCH, "/api/v1/professionals/*/active").hasRole("ADMIN")
+				// Acceso mixto: un CLIENT recibe 403 antes de validar el body; que sea el dueño lo comprueba el servicio
+				.requestMatchers(HttpMethod.PUT, "/api/v1/professionals/*/working-hours").hasAnyRole("ADMIN", "PROFESSIONAL")
 				.requestMatchers("/api/v1/auth/**", "/actuator/health/**").permitAll()
 				.requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
 				.requestMatchers(HttpMethod.GET, "/api/v1/services/**", "/api/v1/professionals/**").permitAll()

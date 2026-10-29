@@ -6,16 +6,27 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import com.q.q.entity.Professional;
+
+import jakarta.persistence.LockModeType;
 
 public interface ProfessionalRepository extends JpaRepository<Professional, Long> {
 
 	// Perfil, usuario y servicios en una sola consulta
 	@EntityGraph(attributePaths = { "user", "services" })
 	Optional<Professional> findWithDetailsById(Long id);
+
+	@EntityGraph(attributePaths = "user")
+	Optional<Professional> findWithUserById(Long id);
+
+	// SELECT ... FOR UPDATE: serializa los cambios sobre un mismo profesional (p. ej. reemplazar su horario)
+	@Lock(LockModeType.PESSIMISTIC_WRITE)
+	@Query("select p from Professional p where p.id = :id")
+	Optional<Professional> findByIdForUpdate(@Param("id") Long id);
 
 	// Un parámetro en null desactiva ese filtro (active es el perfil; userActive, su usuario). El usuario llega con
 	// un join fetch (es *-a-uno: la paginación sigue en SQL) y los servicios de toda la página, en una consulta
