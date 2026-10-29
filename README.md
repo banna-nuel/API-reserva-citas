@@ -605,7 +605,7 @@ Sin token o con un rol distinto de ADMIN, las lecturas solo muestran servicios a
 | Método | Ruta | Descripción | Acceso | Éxito |
 |---|---|---|---|---|
 | GET | `/professionals` | Listar (paginado; `?serviceId=&page=&size=&sort=`; el ADMIN también `?active=`) | Público | 200 |
-| GET | `/professionals/{id}` | Detalle (uno inactivo da 404, salvo al ADMIN) | Público | 200 |
+| GET | `/professionals/{id}` | Detalle (con el perfil o el usuario inactivo da 404, salvo al ADMIN) | Público | 200 |
 | POST | `/professionals` | Crea el usuario (rol PROFESSIONAL) y su perfil en una transacción | ADMIN | 201 |
 | PUT | `/professionals/{id}` | Reemplazar `specialty` y `bio` (no cambia `active` ni los datos del usuario) | ADMIN | 200 |
 | PATCH | `/professionals/{id}/active` | Activar/desactivar el perfil (`{ "active": false }`) | ADMIN | 200 |
@@ -614,7 +614,7 @@ Sin token o con un rol distinto de ADMIN, las lecturas solo muestran servicios a
 | PUT | `/professionals/{id}/working-hours` | Reemplazar horario laboral | ADMIN o el propio profesional | 200 |
 | GET | `/professionals/{id}/availability?date=&serviceId=` | Horarios libres de un día | Público | 200 |
 
-Sin token o con un rol distinto de ADMIN, las lecturas solo muestran profesionales activos y, de cada uno, sus servicios activos; además omiten `userId`, `email`, `phone`, `active` y `createdAt`. Los endpoints de `working-hours` llegan en la Fase 4c y `availability` en la Fase 5.
+Sin token o con un rol distinto de ADMIN, las lecturas solo muestran profesionales con el perfil **y** el usuario activos y, de cada uno, sus servicios activos; además omiten `userId`, `email`, `phone`, `active`, `userActive` y `createdAt`. Los endpoints de `working-hours` llegan en la Fase 4c y `availability` en la Fase 5.
 
 **Citas**
 
@@ -787,6 +787,7 @@ Respuesta `201` (con cabecera `Location: http://localhost:8080/api/v1/profession
   "specialty": "Fisioterapia",
   "bio": "Diez años de experiencia en rehabilitación",
   "active": true,
+  "userActive": true,
   "services": [
     { "id": 1, "name": "Consulta general", "durationMinutes": 30, "price": 80000.00, "active": true },
     { "id": 2, "name": "Masaje terapéutico", "durationMinutes": 60, "price": 120000.00, "active": true }
@@ -823,18 +824,18 @@ Listar → `GET /api/v1/professionals?serviceId=1&page=0&size=20&sort=fullName,a
 }
 ```
 
-- Privacidad: la vista pública no incluye `userId`, `email`, `phone`, `active` ni `createdAt`. El ADMIN recibe en todas las lecturas la vista completa (la del alta).
-- Sin token o sin ser ADMIN solo aparecen los profesionales activos, en `services` solo los servicios activos, y el parámetro `active` se ignora. El ADMIN ve todos, puede filtrar con `active=true` o `active=false`, y ve todos los servicios asignados, cada uno con su `active`.
+- Privacidad: la vista pública no incluye `userId`, `email`, `phone`, `active`, `userActive` ni `createdAt`. El ADMIN recibe en todas las lecturas la vista completa (la del alta); `active` es el estado del perfil y `userActive` el de su usuario.
+- Sin token o sin ser ADMIN solo aparecen los profesionales con el perfil activo **y** el usuario activo, en `services` solo los servicios activos, y el parámetro `active` se ignora. El ADMIN ve todos, puede filtrar con `active=true` o `active=false` (estado del perfil), y ve todos los servicios asignados, cada uno con su `active`.
 - `serviceId` (opcional) deja solo a quienes ofrecen ese servicio. Si el servicio no existe (o, para quien no es ADMIN, si está inactivo) → `200` con `content: []`.
 - `services` va ordenado por `id`.
 - `size` vale 20 por defecto y 100 como máximo. `sort` solo acepta `id`, `fullName`, `specialty` y `createdAt`, con `,asc` o `,desc`; otro campo → `400 INVALID_SORT`. Sin `sort` se ordena por `id` ascendente, y `id` se agrega siempre como desempate.
 - `serviceId` que no sea un número o `active` que no sea booleano → `400 INVALID_PARAMETER`.
 
-Detalle → `GET /api/v1/professionals/{id}` (público) → `200` con la vista que corresponde a quien pregunta. Si no existe, o si está inactivo y quien pregunta no es ADMIN → `404 RESOURCE_NOT_FOUND`.
+Detalle → `GET /api/v1/professionals/{id}` (público) → `200` con la vista que corresponde a quien pregunta. Si no existe, o si su perfil o su usuario están inactivos y quien pregunta no es ADMIN → `404 RESOURCE_NOT_FOUND`.
 
 Actualizar → `PUT /api/v1/professionals/{id}` (ADMIN) con `{ "specialty": "Fisioterapia deportiva", "bio": "..." }` → `200` con la vista de ADMIN. Reemplaza solo `specialty` (mismas reglas que en el alta) y `bio` (si se omite, queda vacía); no cambia `active`. `fullName` y `phone` son del usuario y se cambian con `PUT /users/me`; `email`, `userId`, `active` y cualquier otro campo se ignoran. Errores: `400 VALIDATION_ERROR` · `401 AUTHENTICATION_REQUIRED` · `403 ACCESS_DENIED` · `404 RESOURCE_NOT_FOUND`.
 
-Activar o desactivar → `PATCH /api/v1/professionals/{id}/active` (ADMIN) con `{ "active": false }` → `200` con la vista de ADMIN. Desactivar el perfil lo saca de las lecturas públicas (RN-10), pero **no** desactiva su usuario: puede seguir iniciando sesión. Para cortarle el acceso está `PATCH /users/{userId}/active`. Errores: `400 VALIDATION_ERROR` (falta `active`) · `401 AUTHENTICATION_REQUIRED` · `403 ACCESS_DENIED` · `404 RESOURCE_NOT_FOUND`.
+Activar o desactivar → `PATCH /api/v1/professionals/{id}/active` (ADMIN) con `{ "active": false }` → `200` con la vista de ADMIN. Desactivar el perfil lo saca de las lecturas públicas (RN-10), pero **no** desactiva su usuario: puede seguir iniciando sesión. Para cortarle el acceso está `PATCH /users/{userId}/active`, que además lo saca de las lecturas públicas aunque su perfil siga activo (vuelve a aparecer al reactivar el usuario). Errores: `400 VALIDATION_ERROR` (falta `active`) · `401 AUTHENTICATION_REQUIRED` · `403 ACCESS_DENIED` · `404 RESOURCE_NOT_FOUND`.
 
 Asignar servicios → `PUT /api/v1/professionals/{id}/services` (ADMIN) con `{ "serviceIds": [1, 3] }` → `200` con la vista de ADMIN. Reemplaza el conjunto completo: `[]` lo deja sin servicios y los ids repetidos se ignoran. Ids inexistentes o inactivos → `422 INVALID_SERVICE_IDS` (con los ids en `details`, como en el alta) y no cambia nada. Si más tarde se desactiva un servicio asignado, sigue asignado pero deja de aparecer en la vista pública. Errores: `400 VALIDATION_ERROR` (falta `serviceIds` o trae un `null`) · `401 AUTHENTICATION_REQUIRED` · `403 ACCESS_DENIED` · `404 RESOURCE_NOT_FOUND` · `422 INVALID_SERVICE_IDS`.
 
