@@ -1017,7 +1017,7 @@ Se hace en tres partes: Fase 4a (servicios), Fase 4b (profesionales) y Fase 4c (
 
 - [x] CRUD de `ServiceOffering` (escritura solo ADMIN; lectura pública, paginada y con filtros)
 - [x] `Professional`: alta (usuario + perfil) y asignación de servicios
-- [ ] `WorkingHour`: GET/PUT validando que `fin > inicio` y que los bloques de un mismo día no se solapen
+- [x] `WorkingHour`: GET/PUT validando que `fin > inicio` y que los bloques de un mismo día no se solapen
 
 **Listo cuando:** un CLIENT recibe 403 en los endpoints de ADMIN y un ADMIN puede armar el catálogo completo.
 
