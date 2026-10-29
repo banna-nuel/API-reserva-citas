@@ -35,8 +35,8 @@ public class ProfessionalMapper {
 						s.getPrice(), s.isActive()))
 				.toList();
 		return new ProfessionalAdminResponse(professional.getId(), user.getId(), user.getFullName(), user.getEmail(),
-				user.getPhone(), professional.getSpecialty(), professional.getBio(), professional.isActive(), services,
-				professional.getCreatedAt());
+				user.getPhone(), professional.getSpecialty(), professional.getBio(), professional.isActive(),
+				user.isActive(), services, professional.getCreatedAt());
 	}
 
 }

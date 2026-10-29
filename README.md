@@ -605,16 +605,16 @@ Sin token o con un rol distinto de ADMIN, las lecturas solo muestran servicios a
 | Método | Ruta | Descripción | Acceso | Éxito |
 |---|---|---|---|---|
 | GET | `/professionals` | Listar (paginado; `?serviceId=&page=&size=&sort=`; el ADMIN también `?active=`) | Público | 200 |
-| GET | `/professionals/{id}` | Detalle (uno inactivo da 404, salvo al ADMIN) | Público | 200 |
+| GET | `/professionals/{id}` | Detalle (con el perfil o el usuario inactivo da 404, salvo al ADMIN) | Público | 200 |
 | POST | `/professionals` | Crea el usuario (rol PROFESSIONAL) y su perfil en una transacción | ADMIN | 201 |
 | PUT | `/professionals/{id}` | Reemplazar `specialty` y `bio` (no cambia `active` ni los datos del usuario) | ADMIN | 200 |
 | PATCH | `/professionals/{id}/active` | Activar/desactivar el perfil (`{ "active": false }`) | ADMIN | 200 |
 | PUT | `/professionals/{id}/services` | Reemplazar los servicios que ofrece (`{ "serviceIds": [1, 2] }`) | ADMIN | 200 |
-| GET | `/professionals/{id}/working-hours` | Ver horario laboral | Público | 200 |
-| PUT | `/professionals/{id}/working-hours` | Reemplazar horario laboral | ADMIN o el propio profesional | 200 |
+| GET | `/professionals/{id}/working-hours` | Ver horario laboral (bloques ordenados por día y hora) | Público | 200 |
+| PUT | `/professionals/{id}/working-hours` | Reemplazar todo el horario laboral (`{ "blocks": [...] }`) | ADMIN o el propio profesional | 200 |
 | GET | `/professionals/{id}/availability?date=&serviceId=` | Horarios libres de un día | Público | 200 |
 
-Sin token o con un rol distinto de ADMIN, las lecturas solo muestran profesionales activos y, de cada uno, sus servicios activos; además omiten `userId`, `email`, `phone`, `active` y `createdAt`. Los endpoints de `working-hours` llegan en la Fase 4c y `availability` en la Fase 5.
+Sin token o con un rol distinto de ADMIN, las lecturas solo muestran profesionales con el perfil **y** el usuario activos y, de cada uno, sus servicios activos; además omiten `userId`, `email`, `phone`, `active`, `userActive` y `createdAt`. `availability` llega en la Fase 5.
 
 **Citas**
 
@@ -787,6 +787,7 @@ Respuesta `201` (con cabecera `Location: http://localhost:8080/api/v1/profession
   "specialty": "Fisioterapia",
   "bio": "Diez años de experiencia en rehabilitación",
   "active": true,
+  "userActive": true,
   "services": [
     { "id": 1, "name": "Consulta general", "durationMinutes": 30, "price": 80000.00, "active": true },
     { "id": 2, "name": "Masaje terapéutico", "durationMinutes": 60, "price": 120000.00, "active": true }
@@ -823,22 +824,77 @@ Listar → `GET /api/v1/professionals?serviceId=1&page=0&size=20&sort=fullName,a
 }
 ```
 
-- Privacidad: la vista pública no incluye `userId`, `email`, `phone`, `active` ni `createdAt`. El ADMIN recibe en todas las lecturas la vista completa (la del alta).
-- Sin token o sin ser ADMIN solo aparecen los profesionales activos, en `services` solo los servicios activos, y el parámetro `active` se ignora. El ADMIN ve todos, puede filtrar con `active=true` o `active=false`, y ve todos los servicios asignados, cada uno con su `active`.
+- Privacidad: la vista pública no incluye `userId`, `email`, `phone`, `active`, `userActive` ni `createdAt`. El ADMIN recibe en todas las lecturas la vista completa (la del alta); `active` es el estado del perfil y `userActive` el de su usuario.
+- Sin token o sin ser ADMIN solo aparecen los profesionales con el perfil activo **y** el usuario activo, en `services` solo los servicios activos, y el parámetro `active` se ignora. El ADMIN ve todos, puede filtrar con `active=true` o `active=false` (estado del perfil), y ve todos los servicios asignados, cada uno con su `active`.
 - `serviceId` (opcional) deja solo a quienes ofrecen ese servicio. Si el servicio no existe (o, para quien no es ADMIN, si está inactivo) → `200` con `content: []`.
 - `services` va ordenado por `id`.
 - `size` vale 20 por defecto y 100 como máximo. `sort` solo acepta `id`, `fullName`, `specialty` y `createdAt`, con `,asc` o `,desc`; otro campo → `400 INVALID_SORT`. Sin `sort` se ordena por `id` ascendente, y `id` se agrega siempre como desempate.
 - `serviceId` que no sea un número o `active` que no sea booleano → `400 INVALID_PARAMETER`.
 
-Detalle → `GET /api/v1/professionals/{id}` (público) → `200` con la vista que corresponde a quien pregunta. Si no existe, o si está inactivo y quien pregunta no es ADMIN → `404 RESOURCE_NOT_FOUND`.
+Detalle → `GET /api/v1/professionals/{id}` (público) → `200` con la vista que corresponde a quien pregunta. Si no existe, o si su perfil o su usuario están inactivos y quien pregunta no es ADMIN → `404 RESOURCE_NOT_FOUND`.
 
 Actualizar → `PUT /api/v1/professionals/{id}` (ADMIN) con `{ "specialty": "Fisioterapia deportiva", "bio": "..." }` → `200` con la vista de ADMIN. Reemplaza solo `specialty` (mismas reglas que en el alta) y `bio` (si se omite, queda vacía); no cambia `active`. `fullName` y `phone` son del usuario y se cambian con `PUT /users/me`; `email`, `userId`, `active` y cualquier otro campo se ignoran. Errores: `400 VALIDATION_ERROR` · `401 AUTHENTICATION_REQUIRED` · `403 ACCESS_DENIED` · `404 RESOURCE_NOT_FOUND`.
 
-Activar o desactivar → `PATCH /api/v1/professionals/{id}/active` (ADMIN) con `{ "active": false }` → `200` con la vista de ADMIN. Desactivar el perfil lo saca de las lecturas públicas (RN-10), pero **no** desactiva su usuario: puede seguir iniciando sesión. Para cortarle el acceso está `PATCH /users/{userId}/active`. Errores: `400 VALIDATION_ERROR` (falta `active`) · `401 AUTHENTICATION_REQUIRED` · `403 ACCESS_DENIED` · `404 RESOURCE_NOT_FOUND`.
+Activar o desactivar → `PATCH /api/v1/professionals/{id}/active` (ADMIN) con `{ "active": false }` → `200` con la vista de ADMIN. Desactivar el perfil lo saca de las lecturas públicas (RN-10), pero **no** desactiva su usuario: puede seguir iniciando sesión. Para cortarle el acceso está `PATCH /users/{userId}/active`, que además lo saca de las lecturas públicas aunque su perfil siga activo (vuelve a aparecer al reactivar el usuario). Errores: `400 VALIDATION_ERROR` (falta `active`) · `401 AUTHENTICATION_REQUIRED` · `403 ACCESS_DENIED` · `404 RESOURCE_NOT_FOUND`.
 
 Asignar servicios → `PUT /api/v1/professionals/{id}/services` (ADMIN) con `{ "serviceIds": [1, 3] }` → `200` con la vista de ADMIN. Reemplaza el conjunto completo: `[]` lo deja sin servicios y los ids repetidos se ignoran. Ids inexistentes o inactivos → `422 INVALID_SERVICE_IDS` (con los ids en `details`, como en el alta) y no cambia nada. Si más tarde se desactiva un servicio asignado, sigue asignado pero deja de aparecer en la vista pública. Errores: `400 VALIDATION_ERROR` (falta `serviceIds` o trae un `null`) · `401 AUTHENTICATION_REQUIRED` · `403 ACCESS_DENIED` · `404 RESOURCE_NOT_FOUND` · `422 INVALID_SERVICE_IDS`.
 
-Todas las escrituras de `/professionals` exigen ADMIN también por URL en `SecurityConfig` (además de `@PreAuthorize` y de la comprobación en el servicio).
+Todas las escrituras de `/professionals` exigen ADMIN también por URL en `SecurityConfig` (además de `@PreAuthorize` y de la comprobación en el servicio), salvo el horario laboral, que también puede editar el propio profesional (ver abajo).
+
+**Horario laboral**
+
+Ver → `GET /api/v1/professionals/{id}/working-hours` (público) → `200`:
+
+```json
+{
+  "professionalId": 2,
+  "blocks": [
+    { "dayOfWeek": "MONDAY", "startTime": "09:00", "endTime": "12:00" },
+    { "dayOfWeek": "MONDAY", "startTime": "14:00", "endTime": "18:00" },
+    { "dayOfWeek": "TUESDAY", "startTime": "09:00", "endTime": "12:00" }
+  ]
+}
+```
+
+- Los bloques van ordenados por día (de `MONDAY` a `SUNDAY`) y por hora de inicio. Sin horario → `"blocks": []`.
+- Misma visibilidad que el detalle del profesional: si no existe, o si su perfil o su usuario están inactivos y quien pregunta no es ADMIN → `404 RESOURCE_NOT_FOUND`.
+
+Reemplazar → `PUT /api/v1/professionals/{id}/working-hours` (ADMIN, o el PROFESSIONAL dueño de ese perfil) con el horario **completo**: lo que no venga se borra. Por ejemplo, el de la sección 12.3 (lunes a viernes de 09:00 a 12:00 y de 14:00 a 18:00) lleva diez bloques como estos:
+
+```json
+{
+  "blocks": [
+    { "dayOfWeek": "MONDAY", "startTime": "09:00", "endTime": "12:00" },
+    { "dayOfWeek": "MONDAY", "startTime": "14:00", "endTime": "18:00" }
+  ]
+}
+```
+
+→ `200` con el horario resultante, en el mismo formato que el `GET`. `{ "blocks": [] }` borra el horario. El reemplazo ocurre en una sola transacción: si la petición falla, el horario anterior queda intacto. Dos reemplazos simultáneos del mismo profesional se aplican uno detrás del otro (se bloquea su fila), así que el resultado es uno de los dos horarios completo, nunca una mezcla.
+
+Reglas del body (todas dan `400 VALIDATION_ERROR` con el campo en `details`, p. ej. `blocks[0].startTime`):
+
+- `blocks`: obligatorio (puede ser `[]`), con como máximo 5 bloques por día y 35 en total.
+- `dayOfWeek`: obligatorio, de `MONDAY` a `SUNDAY` (en inglés y en mayúsculas).
+- `startTime` y `endTime`: obligatorios, en formato `HH:mm` de 24 horas, de `00:00` a `23:59` y sin segundos: `9:00`, `24:00`, `25:00` o `09:00:30` no valen.
+- `endTime` debe ser posterior a `startTime` (un bloque no cruza la medianoche).
+- Dos bloques del mismo día no pueden solaparse: hay solape si `inicioA < finB` y `finA > inicioB` → `422 WORKING_HOURS_OVERLAP`, con un elemento en `details` por cada par en conflicto: `[{ "field": "blocks", "message": "MONDAY: 09:00-12:00 se solapa con 11:00-13:00" }]`. Los bloques contiguos sí valen (`09:00-12:00` y `12:00-14:00`), un bloque repetido cuenta como solape, y el mismo horario en días distintos es válido.
+
+Permisos: el ADMIN edita el horario de cualquier profesional, aunque su perfil esté inactivo. Un PROFESSIONAL solo edita el suyo y solo con el perfil activo: el de otro profesional, o el propio con el perfil inactivo → `403 FORBIDDEN_OPERATION` (el horario es público, así que no se oculta con un `404`). Un CLIENT recibe `403 ACCESS_DENIED` por la regla de URL, antes de que se valide el body.
+
+Orden de comprobaciones del `PUT` (gana la primera que falla):
+
+1. Token y rol, por la regla de URL: sin token → `401`; un CLIENT → `403 ACCESS_DENIED`.
+2. Body → `400`.
+3. Profesional inexistente → `404 RESOURCE_NOT_FOUND`.
+4. Dueño y perfil activo (solo para un PROFESSIONAL) → `403 FORBIDDEN_OPERATION`.
+5. Solapes → `422 WORKING_HOURS_OVERLAP`.
+
+Por eso otro PROFESSIONAL que envía un body inválido recibe `400` y no `403`: la propiedad se comprueba en el servicio, después de validar. Es aceptable porque el horario es público y quien llega ya está autenticado con un rol que puede editar horarios.
+
+Errores: `400 VALIDATION_ERROR` · `400 MALFORMED_REQUEST` (JSON mal formado o un valor de otro tipo, p. ej. un número donde va una lista) · `401 AUTHENTICATION_REQUIRED` · `403 ACCESS_DENIED` · `403 FORBIDDEN_OPERATION` · `404 RESOURCE_NOT_FOUND` · `422 WORKING_HOURS_OVERLAP`.
+
+Cambiar el horario no cancela ni modifica las citas ya reservadas (las citas llegan en la Fase 6): solo cambia la disponibilidad que se calcule a partir de ese momento.
 
 **Citas y disponibilidad**
 
@@ -893,13 +949,13 @@ Disponibilidad → `GET /api/v1/professionals/2/availability?date=2026-11-05&ser
 }
 ```
 
-En errores de validación (`400`), `details` lista los campos: `[{ "field": "email", "message": "debe ser un correo válido" }]`. `422 INVALID_SERVICE_IDS` también lo usa, con un elemento por cada id inválido.
+En errores de validación (`400`), `details` lista los campos: `[{ "field": "email", "message": "debe ser un correo válido" }]`. `422 INVALID_SERVICE_IDS` y `422 WORKING_HOURS_OVERLAP` también lo usan, con un elemento por cada id inválido o por cada par de bloques en conflicto.
 
 | Excepción | HTTP | `code` de ejemplo |
 |---|---|---|
 | `ResourceNotFoundException` | 404 | `RESOURCE_NOT_FOUND` |
 | `ConflictException` | 409 | `SLOT_NOT_AVAILABLE`, `CLIENT_OVERLAP`, `EMAIL_ALREADY_USED`, `SERVICE_NAME_ALREADY_EXISTS`, `INVALID_STATUS_TRANSITION` |
-| `BusinessRuleException` | 422 | `OUTSIDE_WORKING_HOURS`, `TOO_SOON`, `TOO_FAR`, `SERVICE_NOT_OFFERED`, `CANCELLATION_WINDOW_PASSED`, `INVALID_CURRENT_PASSWORD`, `PASSWORD_UNCHANGED`, `CANNOT_DEACTIVATE_SELF`, `INVALID_SERVICE_IDS` |
+| `BusinessRuleException` | 422 | `OUTSIDE_WORKING_HOURS`, `TOO_SOON`, `TOO_FAR`, `SERVICE_NOT_OFFERED`, `CANCELLATION_WINDOW_PASSED`, `INVALID_CURRENT_PASSWORD`, `PASSWORD_UNCHANGED`, `CANNOT_DEACTIVATE_SELF`, `INVALID_SERVICE_IDS`, `WORKING_HOURS_OVERLAP` |
 | `ForbiddenOperationException` | 403 | `FORBIDDEN_OPERATION` |
 | `BadRequestException` (p. ej. `sort` por un campo no permitido) | 400 | `INVALID_SORT` |
 | `MethodArgumentNotValidException` | 400 | `VALIDATION_ERROR` |
@@ -971,7 +1027,7 @@ Se hace en tres partes: Fase 4a (servicios), Fase 4b (profesionales) y Fase 4c (
 
 - [x] CRUD de `ServiceOffering` (escritura solo ADMIN; lectura pública, paginada y con filtros)
 - [x] `Professional`: alta (usuario + perfil) y asignación de servicios
-- [ ] `WorkingHour`: GET/PUT validando que `fin > inicio` y que los bloques de un mismo día no se solapen
+- [x] `WorkingHour`: GET/PUT validando que `fin > inicio` y que los bloques de un mismo día no se solapen
 
 **Listo cuando:** un CLIENT recibe 403 en los endpoints de ADMIN y un ADMIN puede armar el catálogo completo.
 

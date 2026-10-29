@@ -56,10 +56,11 @@ public class ProfessionalService {
 	public PageResponse<ProfessionalView> list(Boolean active, Long serviceId, Pageable pageable) {
 		boolean admin = CurrentUser.isAdmin();
 		Pageable safePageable = SafeSort.apply(pageable, SORTABLE_FIELDS, SORT_PATHS);
-		// Quien no es ADMIN solo ve perfiles activos, y filtrar por un servicio inactivo no le devuelve a nadie
+		// Quien no es ADMIN solo ve perfiles activos con el usuario activo, y filtrar por un servicio inactivo
+		// no le devuelve a nadie
 		Page<Professional> page = admin
-				? professionals.search(active, serviceId, null, safePageable)
-				: professionals.search(Boolean.TRUE, serviceId, Boolean.TRUE, safePageable);
+				? professionals.search(active, null, serviceId, null, safePageable)
+				: professionals.search(Boolean.TRUE, Boolean.TRUE, serviceId, Boolean.TRUE, safePageable);
 		return PageResponse.from(page.map(professional -> toView(professional, admin)));
 	}
 
@@ -67,8 +68,8 @@ public class ProfessionalService {
 	public ProfessionalView get(Long id) {
 		boolean admin = CurrentUser.isAdmin();
 		Professional professional = findProfessional(id);
-		if (!professional.isActive() && !admin) {
-			throw notFound();                        // para el público, un profesional inactivo no existe
+		if (!admin && !professional.isPubliclyVisible()) {
+			throw notFound();                        // para el público, un perfil o usuario inactivo no existe
 		}
 		return toView(professional, admin);
 	}

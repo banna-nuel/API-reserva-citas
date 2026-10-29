@@ -56,6 +56,11 @@ public class Professional {
 	@CreationTimestamp @Column(name = "created_at", updatable = false) private LocalDateTime createdAt;
 	@UpdateTimestamp   @Column(name = "updated_at")                    private LocalDateTime updatedAt;
 
+	// Para quien no es ADMIN, el profesional existe solo si su perfil y su usuario están activos
+	public boolean isPubliclyVisible() {
+		return active && user.isActive();
+	}
+
 	@Override
 	public String toString() {                  // sin el usuario: no arrastra datos personales a un log
 		return "Professional[id=" + id + ", active=" + active + "]";
