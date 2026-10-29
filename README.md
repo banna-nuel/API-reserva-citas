@@ -109,7 +109,7 @@ Los **clientes** consultan servicios, profesionales y horarios libres, y reserva
 |---|---|
 | RN-01 | La duración de la cita la define el servicio: `fin = inicio + duración`. |
 | RN-02 | Un profesional no puede tener dos citas activas (`PENDING`/`CONFIRMED`) solapadas. Hay solape si `nuevoInicio < existenteFin` **y** `nuevoFin > existenteInicio`. |
-| RN-03 | La cita debe caber completa dentro de un bloque del horario laboral del profesional para ese día de la semana. Los bloques contiguos (el fin de uno es el inicio del siguiente, p. ej. `09:00-12:00` y `12:00-14:00`) cuentan como uno solo: la cita puede empezar en uno y terminar en el otro. |
+| RN-03 | La cita debe caber completa dentro de un bloque del horario laboral del profesional para ese día de la semana. Los bloques contiguos (el fin de uno es el inicio del siguiente, p. ej. `09:00-12:00` y `12:00-14:00`) cuentan como uno solo: la cita puede empezar en uno y terminar en el otro. Los horarios se ofrecen anclados al inicio de cada tramo, cada `slot-step-minutes` (un tramo que empieza a las 09:15 ofrece 09:15, 09:45…), y una cita debe empezar exactamente en uno de ellos. |
 | RN-04 | Se reserva con una anticipación mínima (`min-notice-minutes`) y como máximo `max-days-ahead` días hacia adelante. |
 | RN-05 | Servicio y profesional deben estar activos, y el profesional debe ofrecer ese servicio. |
 | RN-06 | Un cliente no puede tener dos citas activas solapadas, ni siquiera con profesionales distintos. |
