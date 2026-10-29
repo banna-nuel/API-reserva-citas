@@ -620,8 +620,8 @@ Sin token o con un rol distinto de ADMIN, las lecturas solo muestran profesional
 
 | Método | Ruta | Descripción | Acceso | Éxito |
 |---|---|---|---|---|
-| POST | `/appointments` | Crear cita | CLIENT, ADMIN | 201 |
-| GET | `/appointments` | Listar según rol (`status`, `from`, `to`, `professionalId`) | Autenticado | 200 |
+| POST | `/appointments` | Crear cita (el ADMIN puede reservar en nombre de un cliente con `clientId`) | CLIENT, ADMIN | 201 |
+| GET | `/appointments` | Listar según rol (paginado; `?status=&from=&to=&professionalId=&page=&size=&sort=`) | Autenticado | 200 |
 | GET | `/appointments/{id}` | Detalle | Dueño, profesional asignado, ADMIN | 200 |
 | PATCH | `/appointments/{id}/confirm` | Confirmar | Profesional asignado, ADMIN | 200 |
 | PATCH | `/appointments/{id}/complete` | Marcar completada | Profesional asignado, ADMIN | 200 |
@@ -630,6 +630,8 @@ Sin token o con un rol distinto de ADMIN, las lecturas solo muestran profesional
 | PATCH | `/appointments/{id}/no-show` | Marcar inasistencia | Profesional asignado, ADMIN | 200 |
 
 `GET /appointments` devuelve: al CLIENT, solo sus citas; al PROFESSIONAL, las de su agenda; al ADMIN, todas.
+
+`POST /appointments` exige CLIENT o ADMIN también por URL en `SecurityConfig`: un PROFESSIONAL recibe `403` antes de que se valide el body. Crear y leer llegan en la Fase 6a; los cambios de estado (`confirm`, `complete`, `cancel`, `reschedule`, `no-show`), en la Fase 6b.
 
 ### 8.3 Ejemplos
 
@@ -898,13 +900,13 @@ Cambiar el horario no cancela ni modifica las citas ya reservadas (las citas lle
 
 **Citas y disponibilidad**
 
-Crear cita → `POST /api/v1/appointments`:
+Crear cita → `POST /api/v1/appointments` (CLIENT o ADMIN):
 
 ```json
 { "professionalId": 2, "serviceId": 1, "startTime": "2026-11-05T10:00:00", "notes": "Primera visita" }
 ```
 
-Respuesta `201` (con cabecera `Location: /api/v1/appointments/41`):
+Respuesta `201` (con cabecera `Location: http://localhost:8080/api/v1/appointments/41`):
 
 ```json
 {
@@ -916,9 +918,78 @@ Respuesta `201` (con cabecera `Location: /api/v1/appointments/41`):
   "endTime": "2026-11-05T10:30:00",
   "status": "PENDING",
   "price": 80000.00,
-  "notes": "Primera visita"
+  "notes": "Primera visita",
+  "cancelReason": null,
+  "createdAt": "2026-11-02T08:15:42.123456"
 }
 ```
+
+- `client`, `professional` y `service` son resúmenes: id y nombre, y la duración del servicio. Nunca llevan email ni teléfono.
+  - `professional.id` es el id del perfil, el de `/professionals/{id}`, no el de su usuario.
+  - `service.durationMinutes` es la duración actual del servicio; la de la cita es `endTime - startTime`.
+- `endTime = startTime + duración del servicio` (RN-01).
+- `price` es el precio del servicio en el momento de reservar. No cambia aunque el servicio cambie de precio después (RN-09).
+- `status` nace en `PENDING`. `cancelReason` es `null` hasta que la cita se cancele (Fase 6b).
+
+Reglas del body:
+
+- `professionalId`, `serviceId` y `startTime`: obligatorios.
+- `startTime` es la hora local del negocio en ISO-8601 (`2026-11-05T10:00:00`), sin zona. Un valor con zona (`2026-11-05T10:00:00Z` o `...-05:00`) o que no sea una fecha-hora → `400 MALFORMED_REQUEST`.
+- `notes`: opcional. Se quitan los espacios sobrantes, lo que queda puede tener hasta 500 caracteres, y si queda vacía se guarda como `null`.
+- `clientId`: solo cuenta cuando reserva un ADMIN, para hacerlo en nombre de un cliente.
+  - Debe existir, tener rol `CLIENT` y estar activo; si no → `422 INVALID_CLIENT_ID`.
+  - Si el ADMIN lo omite, la cita queda a su propio nombre.
+  - Si lo envía un CLIENT, se ignora: un cliente siempre reserva para sí mismo.
+- `id`, `status`, `price`, `endTime` y cualquier otro campo se ignoran.
+
+Orden de comprobaciones (gana la primera que falla):
+
+1. Token y rol, por la regla de URL: sin token → `401 AUTHENTICATION_REQUIRED`; un PROFESSIONAL → `403 ACCESS_DENIED`, aunque el body sea inválido.
+2. Body → `400 VALIDATION_ERROR` (con el campo en `details`) o `400 MALFORMED_REQUEST`.
+3. El profesional no existe, o su perfil o su usuario están inactivos → `404 RESOURCE_NOT_FOUND`. Igual que en la disponibilidad, vale también para el ADMIN.
+4. El servicio no existe o está inactivo → `404 RESOURCE_NOT_FOUND`.
+5. El profesional no ofrece ese servicio → `422 SERVICE_NOT_OFFERED` (RN-05).
+6. Solo si reserva un ADMIN con `clientId`: el cliente no sirve → `422 INVALID_CLIENT_ID`.
+7. Horario (RN-03 y RN-04), en este orden:
+   - `startTime` es anterior a `ahora + min-notice-minutes` → `422 TOO_SOON`;
+   - `startTime` es posterior a `ahora + max-days-ahead` días → `422 TOO_FAR`;
+   - la cita no cabe completa en un tramo del horario de ese día (con los bloques contiguos fusionados) → `422 OUTSIDE_WORKING_HOURS`;
+   - cabe, pero `startTime` no es uno de los horarios que ofrece la disponibilidad → `422 INVALID_SLOT_START`. Esos horarios están anclados al inicio del tramo, cada `slot-step-minutes` minutos, con segundos y fracciones en 0: `10:07` o `10:00:30` no valen.
+
+   Los límites son los mismos de `GET /professionals/{id}/availability`: una hora que aparece ahí pasa estas cuatro comprobaciones.
+8. El profesional ya tiene una cita `PENDING` o `CONFIRMED` que se solapa (RN-02) → `409 SLOT_NOT_AVAILABLE`.
+9. El cliente ya tiene una cita `PENDING` o `CONFIRMED` que se solapa, con cualquier profesional (RN-06) → `409 CLIENT_OVERLAP`.
+
+Hay solape si `inicio < finExistente` y `fin > inicioExistente`: una cita que termina a las 10:00 no impide reservar a las 10:00. Las citas `CANCELLED`, `COMPLETED` y `NO_SHOW` no ocupan horario.
+
+Concurrencia: la reserva corre en una transacción `READ_COMMITTED` que bloquea primero la fila del profesional y después la del cliente, siempre en ese orden.
+
+- Dos reservas simultáneas del mismo horario se aplican una detrás de otra: la primera crea la cita y la segunda recibe `409 SLOT_NOT_AVAILABLE`.
+- Si el mismo cliente reserva a la vez con dos profesionales, la segunda recibe `409 CLIENT_OVERLAP`.
+
+Errores: `400 VALIDATION_ERROR` · `400 MALFORMED_REQUEST` · `401 AUTHENTICATION_REQUIRED` · `403 ACCESS_DENIED` · `404 RESOURCE_NOT_FOUND` · `409 SLOT_NOT_AVAILABLE` · `409 CLIENT_OVERLAP` · `422 SERVICE_NOT_OFFERED` · `422 INVALID_CLIENT_ID` · `422 TOO_SOON` · `422 TOO_FAR` · `422 OUTSIDE_WORKING_HOURS` · `422 INVALID_SLOT_START`.
+
+Listar → `GET /api/v1/appointments?status=PENDING&from=2026-11-01&to=2026-11-30&professionalId=2&page=0&size=20&sort=startTime,asc` (autenticado) → `200` con el formato paginado de `GET /users`. Cada elemento es una cita como la del alta.
+
+- Alcance según el rol (RN-13): un CLIENT ve solo sus citas; un PROFESSIONAL, las de su agenda; el ADMIN, todas.
+- Los filtros se aplican dentro de ese alcance. Uno que apunte fuera (p. ej. un CLIENT con el `professionalId` de alguien con quien no tiene citas) da `content: []`, no `403`.
+- `status` (opcional): `PENDING`, `CONFIRMED`, `CANCELLED`, `COMPLETED` o `NO_SHOW`, en mayúsculas. Otro valor → `400 INVALID_PARAMETER`.
+- `from` y `to` (opcionales): fechas `YYYY-MM-DD`, inclusivas, sobre el día de `startTime`. Por ejemplo, `from=2026-11-05&to=2026-11-05` trae las citas que empiezan ese día.
+  - Formato inválido → `400 INVALID_PARAMETER`.
+  - `from` posterior a `to` → `400 INVALID_DATE_RANGE`.
+- `professionalId` (opcional): solo las citas de ese profesional. Si no es un número → `400 INVALID_PARAMETER`.
+- Paginación y orden:
+  - `size` vale 20 por defecto y 100 como máximo.
+  - `sort` solo acepta `id`, `startTime`, `status`, `price` y `createdAt`, con `,asc` o `,desc`; otro campo → `400 INVALID_SORT`.
+  - Sin `sort` se ordena por `startTime` ascendente, e `id` se agrega siempre como desempate.
+
+Errores: `400 INVALID_PARAMETER` · `400 INVALID_DATE_RANGE` · `400 INVALID_SORT` · `401 AUTHENTICATION_REQUIRED`.
+
+Detalle → `GET /api/v1/appointments/{id}` (autenticado) → `200` con la cita.
+
+- La ven su cliente, el profesional asignado y el ADMIN.
+- Para cualquier otro usuario, o si no existe → `404 RESOURCE_NOT_FOUND`: no se revela que existe (RN-13).
+- `{id}` que no sea un número → `400 INVALID_PARAMETER`.
 
 Disponibilidad → `GET /api/v1/professionals/2/availability?date=2026-11-05&serviceId=1` (público; el token es opcional) → `200`:
 
@@ -978,13 +1049,26 @@ En errores de validación (`400`), `details` lista los campos: `[{ "field": "ema
 
 `422 SERVICE_NOT_OFFERED` (RN-05): el profesional no ofrece el servicio pedido. Lo devuelven la disponibilidad (Fase 5) y la creación de citas (Fase 6).
 
+Códigos de las citas (Fase 6a; el orden en que se comprueban está en 8.3):
+
+| `code` | HTTP | Cuándo |
+|---|---|---|
+| `TOO_SOON` | 422 | `startTime` es anterior a `ahora + min-notice-minutes` (RN-04) |
+| `TOO_FAR` | 422 | `startTime` es posterior a `ahora + max-days-ahead` días (RN-04) |
+| `OUTSIDE_WORKING_HOURS` | 422 | La cita no cabe completa en un tramo del horario de ese día (RN-03) |
+| `INVALID_SLOT_START` | 422 | Cabe en la jornada, pero `startTime` no es uno de los horarios que ofrece la disponibilidad (RN-03) |
+| `INVALID_CLIENT_ID` | 422 | El `clientId` que envía un ADMIN no existe, no es un `CLIENT` o está inactivo |
+| `SLOT_NOT_AVAILABLE` | 409 | El profesional ya tiene una cita activa que se solapa (RN-02) |
+| `CLIENT_OVERLAP` | 409 | El cliente ya tiene una cita activa que se solapa, con cualquier profesional (RN-06) |
+| `INVALID_DATE_RANGE` | 400 | En `GET /appointments`, `from` es posterior a `to` |
+
 | Excepción | HTTP | `code` de ejemplo |
 |---|---|---|
 | `ResourceNotFoundException` | 404 | `RESOURCE_NOT_FOUND` |
 | `ConflictException` | 409 | `SLOT_NOT_AVAILABLE`, `CLIENT_OVERLAP`, `EMAIL_ALREADY_USED`, `SERVICE_NAME_ALREADY_EXISTS`, `INVALID_STATUS_TRANSITION` |
-| `BusinessRuleException` | 422 | `OUTSIDE_WORKING_HOURS`, `TOO_SOON`, `TOO_FAR`, `SERVICE_NOT_OFFERED`, `CANCELLATION_WINDOW_PASSED`, `INVALID_CURRENT_PASSWORD`, `PASSWORD_UNCHANGED`, `CANNOT_DEACTIVATE_SELF`, `INVALID_SERVICE_IDS`, `WORKING_HOURS_OVERLAP` |
+| `BusinessRuleException` | 422 | `OUTSIDE_WORKING_HOURS`, `TOO_SOON`, `TOO_FAR`, `INVALID_SLOT_START`, `INVALID_CLIENT_ID`, `SERVICE_NOT_OFFERED`, `CANCELLATION_WINDOW_PASSED`, `INVALID_CURRENT_PASSWORD`, `PASSWORD_UNCHANGED`, `CANNOT_DEACTIVATE_SELF`, `INVALID_SERVICE_IDS`, `WORKING_HOURS_OVERLAP` |
 | `ForbiddenOperationException` | 403 | `FORBIDDEN_OPERATION` |
-| `BadRequestException` (p. ej. `sort` por un campo no permitido) | 400 | `INVALID_SORT` |
+| `BadRequestException` (p. ej. `sort` por un campo no permitido) | 400 | `INVALID_SORT`, `INVALID_DATE_RANGE` |
 | `MethodArgumentNotValidException` | 400 | `VALIDATION_ERROR` |
 | `HandlerMethodValidationException` (restricciones en `@RequestParam`/`@PathVariable`) | 400 | `VALIDATION_ERROR` |
 | `HttpMessageNotReadableException` (cuerpo ausente, JSON mal formado o un valor de otro tipo, p. ej. un decimal donde va un entero) | 400 | `MALFORMED_REQUEST` |
@@ -1074,11 +1158,22 @@ Para saber qué horas están ocupadas, se adelantaron de la Fase 6 tres piezas m
 **Listo cuando:** los horarios devueltos no incluyen horas ocupadas, pasadas ni fuera de jornada.
 
 ### Fase 6 — Citas (el núcleo)
-- [ ] `Appointment`, `AppointmentStatus` (con `canTransitionTo`) y `AppointmentRepository`
-- [ ] `POST /appointments` aplicando RN-01 a RN-09 (sección 10.4)
-- [ ] `GET /appointments` filtrado por rol y `GET /appointments/{id}`
-- [ ] `confirm`, `complete`, `cancel` (y opcionales: `reschedule`, `no-show`)
-- [ ] Prueba de concurrencia: dos hilos reservan el mismo horario → solo una cita se crea
+
+Se hace en dos partes: Fase 6a (crear, leer y concurrencia) y Fase 6b (cambios de estado). `Appointment` y `AppointmentStatus` ya llegaron, adelantados, en la Fase 5.
+
+**Fase 6a — Crear y leer**
+
+- [ ] `AppointmentRepository`: `countOverlapping`, `countOverlappingForClient` (con un id opcional que excluir, para reprogramar) y la consulta de agenda con `Specification`
+- [ ] `POST /appointments` aplicando RN-01 a RN-06 y RN-09, con el orden de comprobaciones de 8.3
+- [ ] `GET /appointments` filtrado por rol y `GET /appointments/{id}` (RN-13)
+- [ ] Prueba de concurrencia: varios hilos reservan el mismo horario → solo una cita se crea; el mismo cliente con dos profesionales a la vez → solo una
+
+**Listo cuando:** los pasos 1 a 9 de la sección 12.3 pasan, y cada rol ve en `GET /appointments` solo lo que le corresponde.
+
+**Fase 6b — Cambios de estado**
+
+- [ ] `AppointmentStatus.canTransitionTo` (RN-07)
+- [ ] `confirm`, `complete`, `cancel` (RN-08), `reschedule` (RN-12) y `no-show`, bloqueando también primero al profesional y después al cliente
 
 **Listo cuando:** el flujo completo de la sección 12.3 pasa en Postman, incluidos los casos negativos.
 
