@@ -2,12 +2,16 @@ package com.q.q.security;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.util.List;
+
 import org.junit.jupiter.api.Test;
 
 import com.q.q.dto.request.ChangePasswordRequest;
+import com.q.q.dto.request.CreateProfessionalRequest;
 import com.q.q.dto.request.LoginRequest;
 import com.q.q.dto.request.RegisterRequest;
 import com.q.q.dto.response.AuthResponse;
+import com.q.q.entity.Professional;
 import com.q.q.entity.User;
 import com.q.q.entity.enums.Role;
 
@@ -42,6 +46,19 @@ class SensitiveToStringTest {
 		assertThat(new LoginRequest("ana@mail.test", PASSWORD).toString()).doesNotContain(PASSWORD);
 		assertThat(new AuthResponse(TOKEN, "Bearer", 3600).toString()).doesNotContain(TOKEN);
 		assertThat(new ChangePasswordRequest(PASSWORD, "clave-nueva-2").toString()).doesNotContain(PASSWORD, "clave-nueva-2");
+		assertThat(new CreateProfessionalRequest("Ana", "ana@mail.test", PASSWORD, null, "Fisioterapia", null, List.of())
+				.toString()).doesNotContain(PASSWORD);
+	}
+
+	@Test
+	void professionalToStringHasNoUserData() {
+		User user = new User();
+		user.setEmail("pro@mail.test");
+		user.setPasswordHash(HASH);
+		Professional professional = new Professional();
+		professional.setUser(user);
+
+		assertThat(professional.toString()).doesNotContain("pro@mail.test", HASH);
 	}
 
 	@Test

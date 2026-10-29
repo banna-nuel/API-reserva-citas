@@ -551,6 +551,7 @@ Define el contrato **antes** de programar. Esta sección es la fuente de verdad:
 - Autenticación: cabecera `Authorization: Bearer <token>`.
 - Paginación y orden: `?page=0&size=20&sort=startTime,desc` (máximo `size=100`).
 - Filtros como parámetros de consulta: `?status=CONFIRMED&from=2026-11-01&to=2026-11-30`.
+- Números enteros en el body (`durationMinutes`, ids…): un valor con decimales, aunque sea `.0` (p. ej. `30.5` o `30.0`), da `400 MALFORMED_REQUEST`; no se redondea ni se trunca. Los importes (`price`) sí llevan decimales.
 
 | Código | Cuándo |
 |---|---|
@@ -603,14 +604,17 @@ Sin token o con un rol distinto de ADMIN, las lecturas solo muestran servicios a
 
 | Método | Ruta | Descripción | Acceso | Éxito |
 |---|---|---|---|---|
-| GET | `/professionals` | Listar (`?serviceId=`) | Público | 200 |
-| GET | `/professionals/{id}` | Detalle | Público | 200 |
+| GET | `/professionals` | Listar (paginado; `?serviceId=&page=&size=&sort=`; el ADMIN también `?active=`) | Público | 200 |
+| GET | `/professionals/{id}` | Detalle (uno inactivo da 404, salvo al ADMIN) | Público | 200 |
 | POST | `/professionals` | Crea el usuario (rol PROFESSIONAL) y su perfil en una transacción | ADMIN | 201 |
-| PUT | `/professionals/{id}` | Actualizar | ADMIN | 200 |
-| PUT | `/professionals/{id}/services` | Asignar servicios (lista de ids) | ADMIN | 200 |
+| PUT | `/professionals/{id}` | Reemplazar `specialty` y `bio` (no cambia `active` ni los datos del usuario) | ADMIN | 200 |
+| PATCH | `/professionals/{id}/active` | Activar/desactivar el perfil (`{ "active": false }`) | ADMIN | 200 |
+| PUT | `/professionals/{id}/services` | Reemplazar los servicios que ofrece (`{ "serviceIds": [1, 2] }`) | ADMIN | 200 |
 | GET | `/professionals/{id}/working-hours` | Ver horario laboral | Público | 200 |
 | PUT | `/professionals/{id}/working-hours` | Reemplazar horario laboral | ADMIN o el propio profesional | 200 |
 | GET | `/professionals/{id}/availability?date=&serviceId=` | Horarios libres de un día | Público | 200 |
+
+Sin token o con un rol distinto de ADMIN, las lecturas solo muestran profesionales activos y, de cada uno, sus servicios activos; además omiten `userId`, `email`, `phone`, `active` y `createdAt`. Los endpoints de `working-hours` llegan en la Fase 4c y `availability` en la Fase 5.
 
 **Citas**
 
@@ -760,6 +764,82 @@ Desactivar → `DELETE /api/v1/services/{id}` (ADMIN) → `204` sin cuerpo. Es u
 
 Activar o desactivar → `PATCH /api/v1/services/{id}/active` (ADMIN) con `{ "active": true }` → `200` con el servicio actualizado. Errores: `400 VALIDATION_ERROR` (falta `active`) · `401 AUTHENTICATION_REQUIRED` · `403 ACCESS_DENIED` · `404 RESOURCE_NOT_FOUND`.
 
+**Profesionales**
+
+Alta → `POST /api/v1/professionals` (ADMIN). Crea en una sola transacción el usuario (rol `PROFESSIONAL`, activo) y su perfil:
+
+```json
+{
+  "fullName": "Carlos Ruiz", "email": "Carlos.Ruiz@Example.com", "password": "una-clave-segura", "phone": "3001112233",
+  "specialty": "Fisioterapia", "bio": "Diez años de experiencia en rehabilitación", "serviceIds": [1, 2]
+}
+```
+
+Respuesta `201` (con cabecera `Location: http://localhost:8080/api/v1/professionals/2`) con la vista de ADMIN:
+
+```json
+{
+  "id": 2,
+  "userId": 8,
+  "fullName": "Carlos Ruiz",
+  "email": "carlos.ruiz@example.com",
+  "phone": "3001112233",
+  "specialty": "Fisioterapia",
+  "bio": "Diez años de experiencia en rehabilitación",
+  "active": true,
+  "services": [
+    { "id": 1, "name": "Consulta general", "durationMinutes": 30, "price": 80000.00, "active": true },
+    { "id": 2, "name": "Masaje terapéutico", "durationMinutes": 60, "price": 120000.00, "active": true }
+  ],
+  "createdAt": "2026-10-26T09:00:00.123456"
+}
+```
+
+Reglas del body:
+
+- `fullName`, `email`, `password` y `phone`: las mismas del registro (RN-11). El email se guarda en minúsculas y es único sin importar mayúsculas (`409 EMAIL_ALREADY_USED`, también si dos altas llegan a la vez); la contraseña va de 8 a 72 caracteres y como máximo 72 bytes, y nunca se devuelve ni se escribe en el log.
+- `specialty`: obligatoria. Se quitan los espacios del principio y del final, y lo que queda debe tener de 1 a 100 caracteres.
+- `bio`: opcional, máx. 500 caracteres. Se quitan los espacios sobrantes; si queda vacía se guarda como `null`.
+- `serviceIds`: opcional (sin él, el profesional nace sin servicios). Cada id debe existir y estar activo; los repetidos se ignoran. Si alguno no sirve → `422 INVALID_SERVICE_IDS`, con un elemento en `details` por cada id inválido: `[{ "field": "serviceIds", "message": "El servicio 99 no existe o está inactivo" }]`.
+- `role`, `active`, `userId` y cualquier otro campo se ignoran.
+- Si algo falla no queda ni el usuario ni el perfil, y el email sigue libre para un nuevo intento.
+
+Errores: `400 VALIDATION_ERROR` · `401 AUTHENTICATION_REQUIRED` · `403 ACCESS_DENIED` (no es ADMIN; se responde antes de validar el body) · `409 EMAIL_ALREADY_USED` · `422 INVALID_SERVICE_IDS`.
+
+El profesional inicia sesión con `POST /auth/login` como cualquier usuario, y su `GET /users/me` dice `"role": "PROFESSIONAL"`. Su nombre y su teléfono son datos del usuario: los cambia él mismo con `PUT /users/me`, no se editan en `/professionals`.
+
+Listar → `GET /api/v1/professionals?serviceId=1&page=0&size=20&sort=fullName,asc` (público) → `200` con el formato paginado de `GET /users`. Sin token, o con el token de un CLIENT o PROFESSIONAL, cada elemento es la vista pública:
+
+```json
+{
+  "content": [
+    { "id": 2, "fullName": "Carlos Ruiz", "specialty": "Fisioterapia", "bio": "Diez años de experiencia en rehabilitación",
+      "services": [ { "id": 1, "name": "Consulta general", "durationMinutes": 30, "price": 80000.00 } ] }
+  ],
+  "page": 0,
+  "size": 20,
+  "totalElements": 1,
+  "totalPages": 1
+}
+```
+
+- Privacidad: la vista pública no incluye `userId`, `email`, `phone`, `active` ni `createdAt`. El ADMIN recibe en todas las lecturas la vista completa (la del alta).
+- Sin token o sin ser ADMIN solo aparecen los profesionales activos, en `services` solo los servicios activos, y el parámetro `active` se ignora. El ADMIN ve todos, puede filtrar con `active=true` o `active=false`, y ve todos los servicios asignados, cada uno con su `active`.
+- `serviceId` (opcional) deja solo a quienes ofrecen ese servicio. Si el servicio no existe (o, para quien no es ADMIN, si está inactivo) → `200` con `content: []`.
+- `services` va ordenado por `id`.
+- `size` vale 20 por defecto y 100 como máximo. `sort` solo acepta `id`, `fullName`, `specialty` y `createdAt`, con `,asc` o `,desc`; otro campo → `400 INVALID_SORT`. Sin `sort` se ordena por `id` ascendente, y `id` se agrega siempre como desempate.
+- `serviceId` que no sea un número o `active` que no sea booleano → `400 INVALID_PARAMETER`.
+
+Detalle → `GET /api/v1/professionals/{id}` (público) → `200` con la vista que corresponde a quien pregunta. Si no existe, o si está inactivo y quien pregunta no es ADMIN → `404 RESOURCE_NOT_FOUND`.
+
+Actualizar → `PUT /api/v1/professionals/{id}` (ADMIN) con `{ "specialty": "Fisioterapia deportiva", "bio": "..." }` → `200` con la vista de ADMIN. Reemplaza solo `specialty` (mismas reglas que en el alta) y `bio` (si se omite, queda vacía); no cambia `active`. `fullName` y `phone` son del usuario y se cambian con `PUT /users/me`; `email`, `userId`, `active` y cualquier otro campo se ignoran. Errores: `400 VALIDATION_ERROR` · `401 AUTHENTICATION_REQUIRED` · `403 ACCESS_DENIED` · `404 RESOURCE_NOT_FOUND`.
+
+Activar o desactivar → `PATCH /api/v1/professionals/{id}/active` (ADMIN) con `{ "active": false }` → `200` con la vista de ADMIN. Desactivar el perfil lo saca de las lecturas públicas (RN-10), pero **no** desactiva su usuario: puede seguir iniciando sesión. Para cortarle el acceso está `PATCH /users/{userId}/active`. Errores: `400 VALIDATION_ERROR` (falta `active`) · `401 AUTHENTICATION_REQUIRED` · `403 ACCESS_DENIED` · `404 RESOURCE_NOT_FOUND`.
+
+Asignar servicios → `PUT /api/v1/professionals/{id}/services` (ADMIN) con `{ "serviceIds": [1, 3] }` → `200` con la vista de ADMIN. Reemplaza el conjunto completo: `[]` lo deja sin servicios y los ids repetidos se ignoran. Ids inexistentes o inactivos → `422 INVALID_SERVICE_IDS` (con los ids en `details`, como en el alta) y no cambia nada. Si más tarde se desactiva un servicio asignado, sigue asignado pero deja de aparecer en la vista pública. Errores: `400 VALIDATION_ERROR` (falta `serviceIds` o trae un `null`) · `401 AUTHENTICATION_REQUIRED` · `403 ACCESS_DENIED` · `404 RESOURCE_NOT_FOUND` · `422 INVALID_SERVICE_IDS`.
+
+Todas las escrituras de `/professionals` exigen ADMIN también por URL en `SecurityConfig` (además de `@PreAuthorize` y de la comprobación en el servicio).
+
 **Citas y disponibilidad**
 
 Crear cita → `POST /api/v1/appointments`:
@@ -813,18 +893,18 @@ Disponibilidad → `GET /api/v1/professionals/2/availability?date=2026-11-05&ser
 }
 ```
 
-En errores de validación (`400`), `details` lista los campos: `[{ "field": "email", "message": "debe ser un correo válido" }]`.
+En errores de validación (`400`), `details` lista los campos: `[{ "field": "email", "message": "debe ser un correo válido" }]`. `422 INVALID_SERVICE_IDS` también lo usa, con un elemento por cada id inválido.
 
 | Excepción | HTTP | `code` de ejemplo |
 |---|---|---|
 | `ResourceNotFoundException` | 404 | `RESOURCE_NOT_FOUND` |
 | `ConflictException` | 409 | `SLOT_NOT_AVAILABLE`, `CLIENT_OVERLAP`, `EMAIL_ALREADY_USED`, `SERVICE_NAME_ALREADY_EXISTS`, `INVALID_STATUS_TRANSITION` |
-| `BusinessRuleException` | 422 | `OUTSIDE_WORKING_HOURS`, `TOO_SOON`, `TOO_FAR`, `SERVICE_NOT_OFFERED`, `CANCELLATION_WINDOW_PASSED`, `INVALID_CURRENT_PASSWORD`, `PASSWORD_UNCHANGED`, `CANNOT_DEACTIVATE_SELF` |
+| `BusinessRuleException` | 422 | `OUTSIDE_WORKING_HOURS`, `TOO_SOON`, `TOO_FAR`, `SERVICE_NOT_OFFERED`, `CANCELLATION_WINDOW_PASSED`, `INVALID_CURRENT_PASSWORD`, `PASSWORD_UNCHANGED`, `CANNOT_DEACTIVATE_SELF`, `INVALID_SERVICE_IDS` |
 | `ForbiddenOperationException` | 403 | `FORBIDDEN_OPERATION` |
 | `BadRequestException` (p. ej. `sort` por un campo no permitido) | 400 | `INVALID_SORT` |
 | `MethodArgumentNotValidException` | 400 | `VALIDATION_ERROR` |
 | `HandlerMethodValidationException` (restricciones en `@RequestParam`/`@PathVariable`) | 400 | `VALIDATION_ERROR` |
-| `HttpMessageNotReadableException` (cuerpo ausente o JSON mal formado) | 400 | `MALFORMED_REQUEST` |
+| `HttpMessageNotReadableException` (cuerpo ausente, JSON mal formado o un valor de otro tipo, p. ej. un decimal donde va un entero) | 400 | `MALFORMED_REQUEST` |
 | `MethodArgumentTypeMismatchException` (p. ej. texto donde va un número) | 400 | `INVALID_PARAMETER` |
 | `MissingServletRequestParameterException` | 400 | `MISSING_PARAMETER` |
 | `AuthenticationException` (login con email o clave incorrectos, o usuario inactivo) | 401 | `INVALID_CREDENTIALS` |
@@ -847,7 +927,7 @@ Cada fase termina con algo que puedes **probar en Postman**. No avances a la sig
 - [x] Crear repositorio Git (`main` + `develop`) y `.gitignore`
 - [x] Instalar las herramientas de la sección 3
 - [x] Definir el paquete base (`com.q.q`) y la zona horaria
-- [ ] Crear en Postman la colección `Citas API` y el environment `local` (`baseUrl = http://localhost:8080/api/v1`)
+- [x] Crear en Postman la colección `Citas API` y el environment `local` (`baseUrl = http://localhost:8080/api/v1`)
 
 **Listo cuando:** `java -version`, `docker --version` y `git --version` responden bien.
 
@@ -873,7 +953,7 @@ Cada fase termina con algo que puedes **probar en Postman**. No avances a la sig
 - [x] `AuthUser`, `CustomUserDetailsService`, `JwtService`, `JwtAuthenticationFilter`, `SecurityConfig` (sección 11)
 - [x] `POST /auth/register`, `POST /auth/login`, `GET /users/me`
 - [x] `AdminBootstrap`: un `ApplicationRunner` que crea el primer ADMIN con `app.admin.*` si no existe
-- [ ] Postman: Register → Login (guarda el token) → Me
+- [x] Postman: Register → Login (guarda el token) → Me
 
 **Listo cuando:** sin token → 401, con token → 200, y la contraseña nunca aparece en una respuesta.
 
@@ -886,8 +966,11 @@ Cada fase termina con algo que puedes **probar en Postman**. No avances a la sig
 **Listo cuando:** cada endpoint responde bien con el rol permitido y falla con uno no permitido (un CLIENT recibe 403 en los de ADMIN), y tras cambiar la contraseña solo funciona el login con la nueva.
 
 ### Fase 4 — Catálogo
+
+Se hace en tres partes: Fase 4a (servicios), Fase 4b (profesionales) y Fase 4c (horario laboral, `WorkingHour`).
+
 - [x] CRUD de `ServiceOffering` (escritura solo ADMIN; lectura pública, paginada y con filtros)
-- [ ] `Professional`: alta (usuario + perfil) y asignación de servicios
+- [x] `Professional`: alta (usuario + perfil) y asignación de servicios
 - [ ] `WorkingHour`: GET/PUT validando que `fin > inicio` y que los bloques de un mismo día no se solapen
 
 **Listo cuando:** un CLIENT recibe 403 en los endpoints de ADMIN y un ADMIN puede armar el catálogo completo.
@@ -932,7 +1015,7 @@ Cada fase termina con algo que puedes **probar en Postman**. No avances a la sig
 4. DTOs `record` con validaciones.
 5. Servicio: reglas de negocio, `@Transactional`, excepciones propias, conversión a DTO.
 6. Controlador delgado: `@Valid`, código HTTP correcto, `@PreAuthorize`.
-7. Regla en `SecurityConfig` solo si el endpoint es público.
+7. Regla en `SecurityConfig` si el endpoint es público o solo-ADMIN.
 8. Pruebas: unitaria del servicio (caso feliz + cada error) y del controlador.
 9. Request en Postman con tests automáticos (feliz + 400/401/403/404/409).
 10. Anotaciones OpenAPI, commit (`feat: ...`) y pull request.

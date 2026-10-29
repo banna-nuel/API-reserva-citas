@@ -12,6 +12,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
@@ -92,6 +93,18 @@ abstract class IntegrationTestSupport {
 
 	protected static String bearer(String token) {
 		return "Bearer " + token;
+	}
+
+	// Sin token (null) la petición va como anónima
+	protected static MockHttpServletRequestBuilder authorized(MockHttpServletRequestBuilder request, String token) {
+		return token == null ? request : request.header(HttpHeaders.AUTHORIZATION, bearer(token));
+	}
+
+	// Un String se envía tal cual (permite JSON inválido); cualquier otro objeto se serializa
+	protected MockHttpServletRequestBuilder withJson(MockHttpServletRequestBuilder request, String token,
+			Object requestBody) {
+		return authorized(request, token).contentType(MediaType.APPLICATION_JSON)
+				.content(requestBody instanceof String raw ? raw : jsonBody(requestBody));
 	}
 
 	protected static String body(MvcResult result) throws Exception {
