@@ -1163,10 +1163,10 @@ Se hace en dos partes: Fase 6a (crear, leer y concurrencia) y Fase 6b (cambios d
 
 **Fase 6a — Crear y leer**
 
-- [ ] `AppointmentRepository`: `countOverlapping`, `countOverlappingForClient` (con un id opcional que excluir, para reprogramar) y la consulta de agenda con `Specification`
-- [ ] `POST /appointments` aplicando RN-01 a RN-06 y RN-09, con el orden de comprobaciones de 8.3
-- [ ] `GET /appointments` filtrado por rol y `GET /appointments/{id}` (RN-13)
-- [ ] Prueba de concurrencia: varios hilos reservan el mismo horario → solo una cita se crea; el mismo cliente con dos profesionales a la vez → solo una
+- [x] `AppointmentRepository`: `countOverlapping`, `countOverlappingForClient` (con un id opcional que excluir, para reprogramar) y la consulta de agenda con `Specification`
+- [x] `POST /appointments` aplicando RN-01 a RN-06 y RN-09, con el orden de comprobaciones de 8.3
+- [x] `GET /appointments` filtrado por rol y `GET /appointments/{id}` (RN-13)
+- [x] Prueba de concurrencia: varios hilos reservan el mismo horario → solo una cita se crea; el mismo cliente con dos profesionales a la vez → solo una
 
 **Listo cuando:** los pasos 1 a 9 de la sección 12.3 pasan, y cada rol ve en `GET /appointments` solo lo que le corresponde.
 
