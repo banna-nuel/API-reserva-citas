@@ -882,6 +882,16 @@ Reglas del body (todas dan `400 VALIDATION_ERROR` con el campo en `details`, p. 
 
 Permisos: el ADMIN edita el horario de cualquier profesional, aunque su perfil esté inactivo. Un PROFESSIONAL solo edita el suyo y solo con el perfil activo: el de otro profesional, o el propio con el perfil inactivo → `403 FORBIDDEN_OPERATION` (el horario es público, así que no se oculta con un `404`). Un CLIENT recibe `403 ACCESS_DENIED` por la regla de URL, antes de que se valide el body.
 
+Orden de comprobaciones del `PUT` (gana la primera que falla):
+
+1. Token y rol, por la regla de URL: sin token → `401`; un CLIENT → `403 ACCESS_DENIED`.
+2. Body → `400`.
+3. Profesional inexistente → `404 RESOURCE_NOT_FOUND`.
+4. Dueño y perfil activo (solo para un PROFESSIONAL) → `403 FORBIDDEN_OPERATION`.
+5. Solapes → `422 WORKING_HOURS_OVERLAP`.
+
+Por eso otro PROFESSIONAL que envía un body inválido recibe `400` y no `403`: la propiedad se comprueba en el servicio, después de validar. Es aceptable porque el horario es público y quien llega ya está autenticado con un rol que puede editar horarios.
+
 Errores: `400 VALIDATION_ERROR` · `400 MALFORMED_REQUEST` (JSON mal formado o un valor de otro tipo, p. ej. un número donde va una lista) · `401 AUTHENTICATION_REQUIRED` · `403 ACCESS_DENIED` · `403 FORBIDDEN_OPERATION` · `404 RESOURCE_NOT_FOUND` · `422 WORKING_HOURS_OVERLAP`.
 
 Cambiar el horario no cancela ni modifica las citas ya reservadas (las citas llegan en la Fase 6): solo cambia la disponibilidad que se calcule a partir de ese momento.
