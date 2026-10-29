@@ -57,7 +57,7 @@ class ProfessionalIntegrationTest extends IntegrationTestSupport {
 	private static final String SERVICES = "/api/v1/services";
 	private static final String[] PUBLIC_KEYS = { "id", "fullName", "specialty", "bio", "services" };
 	private static final String[] ADMIN_KEYS = { "id", "userId", "fullName", "email", "phone", "specialty", "bio",
-			"active", "services", "createdAt" };
+			"active", "userActive", "services", "createdAt" };
 	private static final String[] PUBLIC_SERVICE_KEYS = { "id", "name", "durationMinutes", "price" };
 	private static final String[] ADMIN_SERVICE_KEYS = { "id", "name", "durationMinutes", "price", "active" };
 	private static final long MISSING_ID = 99_999_999L;
@@ -359,6 +359,38 @@ class ProfessionalIntegrationTest extends IntegrationTestSupport {
 		mvc.perform(withJson(patch(path + "/active"), admin, "{}"))
 				.andExpectAll(apiError(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", path + "/active"))
 				.andExpect(jsonPath("$.details[0].field").value("active"));
+	}
+
+	@Test
+	void deactivatingTheUserHidesTheProfessionalUntilItIsReactivated() throws Exception {
+		String admin = adminToken();
+		String service = String.valueOf(createService(admin, uniqueName("Usuario inactivo")));
+		String email = uniqueEmail();
+		Long id = createProfessional(admin, email, List.of(Long.valueOf(service)));
+		String path = PROFESSIONALS + "/" + id;
+		String userActivePath = "/api/v1/users/" + idOf(email) + "/active";
+		String client = loginToken(registerClient(), PASSWORD);
+
+		mvc.perform(withJson(patch(userActivePath), admin, Map.of("active", false))).andExpect(status().isOk());
+
+		// Su perfil sigue activo, pero sin usuario activo no existe para el público
+		for (String token : new String[] { null, client }) {
+			mvc.perform(authorized(get(path), token)).andExpectAll(apiError(HttpStatus.NOT_FOUND, "RESOURCE_NOT_FOUND", path));
+			assertThat(listedIds(list(token, "serviceId", service))).isEmpty();
+		}
+		mvc.perform(get(path).header(HttpHeaders.AUTHORIZATION, bearer(admin)))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.active").value(true))
+				.andExpect(jsonPath("$.userActive").value(false));
+		String adminPage = list(admin, "serviceId", service);
+		assertThat(listedIds(adminPage)).containsExactly(id);
+		assertThat(JsonPath.<List<Boolean>>read(adminPage, "$.content[*].userActive")).containsExactly(false);
+
+		mvc.perform(withJson(patch(userActivePath), admin, Map.of("active", true))).andExpect(status().isOk());
+		for (String token : new String[] { null, client }) {
+			mvc.perform(authorized(get(path), token)).andExpect(status().isOk());
+			assertThat(listedIds(list(token, "serviceId", service))).containsExactly(id);
+		}
 	}
 
 	@Test

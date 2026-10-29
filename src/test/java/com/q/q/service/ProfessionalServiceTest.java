@@ -244,7 +244,7 @@ class ProfessionalServiceTest {
 
 	@Test
 	void nonAdminsOnlyListActiveProfessionalsWhateverTheyAskFor() {
-		when(professionals.search(any(), any(), any(), any(Pageable.class))).thenReturn(Page.empty());
+		when(professionals.search(any(), any(), any(), any(), any(Pageable.class))).thenReturn(Page.empty());
 
 		for (Role role : NON_ADMINS) {
 			authenticateAs(role);
@@ -252,33 +252,35 @@ class ProfessionalServiceTest {
 			service.list(null, null, PageRequest.of(0, 20));
 		}
 
-		// Perfil activo y, al filtrar por servicio, solo si ese servicio está activo
-		verify(professionals, times(3)).search(eq(Boolean.TRUE), eq(7L), eq(Boolean.TRUE), any(Pageable.class));
-		verify(professionals, times(3)).search(eq(Boolean.TRUE), isNull(), eq(Boolean.TRUE), any(Pageable.class));
+		// Perfil y usuario activos y, al filtrar por servicio, solo si ese servicio está activo
+		verify(professionals, times(3))
+				.search(eq(Boolean.TRUE), eq(Boolean.TRUE), eq(7L), eq(Boolean.TRUE), any(Pageable.class));
+		verify(professionals, times(3))
+				.search(eq(Boolean.TRUE), eq(Boolean.TRUE), isNull(), eq(Boolean.TRUE), any(Pageable.class));
 	}
 
 	@Test
 	void adminListsAllOrFiltersByActive() {
 		authenticateAs(Role.ADMIN);
-		when(professionals.search(any(), any(), any(), any(Pageable.class))).thenReturn(Page.empty());
+		when(professionals.search(any(), any(), any(), any(), any(Pageable.class))).thenReturn(Page.empty());
 
 		service.list(null, 7L, PageRequest.of(0, 20));
 		service.list(false, null, PageRequest.of(0, 20));
 
-		verify(professionals).search(isNull(), eq(7L), isNull(), any(Pageable.class));
-		verify(professionals).search(eq(Boolean.FALSE), isNull(), isNull(), any(Pageable.class));
+		verify(professionals).search(isNull(), isNull(), eq(7L), isNull(), any(Pageable.class));
+		verify(professionals).search(eq(Boolean.FALSE), isNull(), isNull(), isNull(), any(Pageable.class));
 	}
 
 	@Test
 	void sortIsWhitelistedAndFullNameSortsByTheUsersName() {
-		when(professionals.search(any(), any(), any(), any(Pageable.class))).thenReturn(Page.empty());
+		when(professionals.search(any(), any(), any(), any(), any(Pageable.class))).thenReturn(Page.empty());
 
 		service.list(null, null, PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "fullName")));
 		service.list(null, null, PageRequest.of(1, 5));
 
-		verify(professionals).search(Boolean.TRUE, null, Boolean.TRUE,
+		verify(professionals).search(Boolean.TRUE, Boolean.TRUE, null, Boolean.TRUE,
 				PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "user.fullName").and(Sort.by("id"))));
-		verify(professionals).search(Boolean.TRUE, null, Boolean.TRUE, PageRequest.of(1, 5, Sort.by("id")));
+		verify(professionals).search(Boolean.TRUE, Boolean.TRUE, null, Boolean.TRUE, PageRequest.of(1, 5, Sort.by("id")));
 
 		for (String field : new String[] { "email", "user.fullName", "bio" }) {
 			assertThatThrownBy(() -> service.list(null, null, PageRequest.of(0, 20, Sort.by(field))))
@@ -320,6 +322,23 @@ class ProfessionalServiceTest {
 		authenticateAs(Role.ADMIN);
 		assertThat(service.get(7L)).isInstanceOfSatisfying(ProfessionalAdminResponse.class,
 				view -> assertThat(view.active()).isFalse());
+	}
+
+	@Test
+	void professionalWhoseUserIsInactiveIsHiddenFromEveryoneButAdmins() {
+		Professional existing = professional(8L, true);
+		existing.getUser().setActive(false);                         // PATCH /users/{id}/active con false
+		when(professionals.findWithDetailsById(8L)).thenReturn(Optional.of(existing));
+
+		for (Role role : NON_ADMINS) {
+			authenticateAs(role);
+			assertThatThrownBy(() -> service.get(8L)).isInstanceOf(ResourceNotFoundException.class);
+		}
+		authenticateAs(Role.ADMIN);
+		assertThat(service.get(8L)).isInstanceOfSatisfying(ProfessionalAdminResponse.class, view -> {
+			assertThat(view.active()).isTrue();
+			assertThat(view.userActive()).isFalse();
+		});
 	}
 
 	// ---------- utilidades ----------
