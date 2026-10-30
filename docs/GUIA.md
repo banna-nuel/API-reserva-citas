@@ -278,10 +278,12 @@ citas-api/
 ├── .github/workflows/ci.yml
 ├── .env.example                  # plantilla de variables (el .env real NO se sube)
 ├── .gitignore
-├── docker-compose.yml            # MySQL para desarrollo
+├── .dockerignore                 # lista blanca: a la imagen solo llegan mvnw, .mvn, pom.xml y src
+├── docker-compose.yml            # MySQL para desarrollo (y la API con  --profile app)
 ├── Dockerfile
 ├── pom.xml
-├── README.md
+├── README.md                     # inicio rápido para quien clona el repo
+├── docs/GUIA.md                  # esta guía
 ├── postman/
 │   ├── citas-api.postman_collection.json
 │   └── local.postman_environment.json
@@ -303,7 +305,9 @@ citas-api/
     │   │   ├── dto/
     │   │   │   ├── request/   RegisterRequest, LoginRequest, CreateAppointmentRequest, ...
     │   │   │   └── response/  AuthResponse, UserResponse, AppointmentResponse, TimeSlot, PageResponse, ...
-    │   │   ├── mapper/        AppointmentMapper, ProfessionalMapper, ...   (manuales o MapStruct)
+    │   │   ├── mapper/        AppointmentMapper, ProfessionalMapper, ServiceOfferingMapper, UserMapper,
+    │   │   │                  WorkingHourMapper (manuales)
+    │   │   ├── validation/    EndAfterStart, MaxBlocksPerDay, MaxUtf8Bytes y sus validadores
     │   │   └── exception/     ApiException, ResourceNotFoundException, ConflictException,
     │   │                      BusinessRuleException, ForbiddenOperationException, ApiError,
     │   │                      GlobalExceptionHandler
@@ -314,9 +318,11 @@ citas-api/
     │       └── db/migration/V1__create_schema.sql
     └── test/java/com/q/q
         ├── service/           pruebas unitarias (Mockito)
-        ├── repository/        @DataJpaTest + Testcontainers
         ├── controller/        @WebMvcTest
-        └── integration/       @SpringBootTest de extremo a extremo
+        ├── integration/       @SpringBootTest + MockMvc con MySQL de Testcontainers (también los
+        │                      repositorios y OpenApiDocsTest)
+        ├── e2e/               de extremo a extremo, con el servidor real en un puerto aleatorio
+        └── config/, security/, entity/, dto/, validation/   unitarias de apoyo
 ```
 
 ---
@@ -394,8 +400,10 @@ Crea `.env.example` (este sí se sube al repositorio) y cópialo a `.env` (este 
 No pongas comentarios al final de una línea de valor: van siempre en su propia línea.
 
 ```dotenv
-# Aplicación
+# Aplicación: puerto local (si el 8080 está ocupado, usa p. ej. 8081)
 APP_PORT=8080
+# Solo para  docker compose --profile app : perfil de Spring del contenedor (prod por defecto, sin Swagger)
+# SPRING_PROFILES_ACTIVE=dev
 
 # Base de datos
 DB_HOST=localhost
@@ -405,7 +413,7 @@ DB_USER=citas_user
 DB_PASS=cambia-esta-clave
 DB_ROOT_PASS=cambia-esta-clave-root
 
-# JWT: genera el secreto con  openssl rand -base64 32  (mínimo 256 bits)
+# JWT: secreto en Base64 de 32 bytes o más (cómo generarlo: README, paso 2 "Crear el .env")
 JWT_SECRET=PEGA_AQUI_EL_SECRETO
 JWT_EXPIRATION_MINUTES=60
 
@@ -441,7 +449,7 @@ services:
       MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASS}
       TZ: America/Bogota
     ports:
-      - "3306:3306"
+      - "127.0.0.1:${DB_PORT}:3306"   # solo accesible desde esta maquina
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:
@@ -453,6 +461,8 @@ services:
 volumes:
   mysql_data:
 ```
+
+El `docker-compose.yml` del repositorio trae además un servicio `app` opcional, en el perfil `app`, que corre la API en un contenedor (sección 14). Un `docker compose up -d` normal no lo levanta.
 
 ### 7.5 `application.yml` y perfiles
 
@@ -567,6 +577,8 @@ Define el contrato **antes** de programar. Esta sección es la fuente de verdad:
 | `500 Internal Server Error` | Error inesperado (nunca exponer el stacktrace) |
 
 ### 8.2 Endpoints
+
+Son **30 operaciones**: 2 de Auth, 5 de Usuarios, 6 de Servicios, 9 de Profesionales y 8 de Citas. Swagger UI las agrupa con esas mismas etiquetas (sección 13) y `OpenApiDocsTest` comprueba que el documento OpenAPI coincide con estas tablas: rutas, códigos de respuesta y qué endpoints piden token.
 
 **Auth**
 
@@ -1280,10 +1292,10 @@ Se hace en dos partes: Fase 6a (crear, leer y concurrencia) y Fase 6b (cambios d
 **Listo cuando:** `./mvnw verify` termina en verde.
 
 ### Fase 8 — Documentación y entrega
-- [ ] Anotaciones OpenAPI (`@Tag`, `@Operation`, `@ApiResponse`)
+- [x] Anotaciones OpenAPI (`@Tag`, `@Operation`, `@ApiResponse`)
 - [ ] Exportar la colección y el environment de Postman a `/postman`
-- [ ] `Dockerfile` y workflow de CI (sección 14)
-- [ ] Actualizar este README (cómo correr, variables, usuarios de prueba)
+- [x] `Dockerfile` y workflow de CI (sección 14)
+- [x] Actualizar el README (cómo correr, variables, usuarios de prueba)
 
 **Listo cuando:** una persona nueva clona el repo y lo levanta siguiendo solo el README.
 
@@ -1839,35 +1851,41 @@ Usa MySQL real (Testcontainers) en lugar de H2: las diferencias de SQL y tipos e
 
 **Estructura de la colección**
 
+La colección tiene tres carpetas que se corren en orden; el número es la cantidad de peticiones. Las peticiones que esperan un error llevan su código entre paréntesis.
+
 ```
 Citas API
-├── 00 Auth             Register client · Login admin · Login client · Login professional
-├── 01 Services         CRUD (ADMIN) + listado público
-├── 02 Professionals    Alta · Asignar servicios · Working hours
-├── 03 Availability     Horarios libres
-├── 04 Appointments     Crear · Listar · Confirmar · Cancelar · Completar · Reprogramar
-└── 05 Negative tests   401 · 403 · 400 · 404 · 409 · 422
+├── Auth (6)        Register · Login · Me · Me sin token (401) · Login clave mala (401) · Login admin
+├── Servicios (12)  Crear servicio · Crear como CLIENT (403) · Crear sin token (401) · Crear nombre repetido (409) ·
+│                   Crear duración 0 (400) · Listar público · Obtener · Actualizar · Desactivar ·
+│                   Obtener inactivo sin token (404) · Obtener inactivo como admin · Reactivar
+└── Flujo (15)      Crear profesional · Horario del profesional · Login profesional · Disponibilidad · Reservar cita ·
+                    Reservar repetida (409) · Mis citas · Agenda del profesional · Confirmar · Cancelar ·
+                    Confirmar cancelada (409) · Reservar con body vacío (400) · Cita inexistente (404) ·
+                    Citas sin token (401) · Cliente intenta confirmar (403)
 ```
 
-**Variables del environment `local`:** `baseUrl`, `adminToken`, `clientToken`, `professionalToken`, `serviceId`, `professionalId`, `appointmentId`, `slotStart`.
-Cada request usa en *Authorization → Bearer Token* la variable del rol que corresponde (p. ej. `{{clientToken}}`).
+**Tokens:**
 
-Test del login (guarda el token):
+- *Login* (el del cliente recién registrado) guarda su token en `token`.
+- *Login admin* lo guarda en `adminToken`.
+- *Login profesional* lo guarda en `professionalToken`.
+
+Cada petición declara su propia autorización y no hereda nada de la colección: *Bearer Token* con la variable del rol que toca (p. ej. `{{token}}`), o *No Auth*.
+
+Test del *Login* del cliente (guarda el token):
 
 ```js
-pm.test("Login correcto", () => pm.response.to.have.status(200));
+pm.test("200 OK", () => pm.response.to.have.status(200));
 const body = pm.response.json();
-pm.expect(body.accessToken).to.be.a("string");
-pm.environment.set("clientToken", body.accessToken);
+pm.test("accessToken es un string", () => pm.expect(body.accessToken).to.be.a("string"));
+pm.environment.set("token", body.accessToken);
 ```
 
-Test de crear cita:
+Test de *Reservar cita*:
 
 ```js
-pm.test("201 Created con Location", () => {
-  pm.response.to.have.status(201);
-  pm.response.to.have.header("Location");
-});
+pm.test("201 Created", () => pm.response.to.have.status(201));
 pm.test("Estado inicial PENDING", () => pm.expect(pm.response.json().status).to.eql("PENDING"));
 pm.environment.set("appointmentId", pm.response.json().id);
 ```
@@ -1916,12 +1934,12 @@ Una carpeta sola, o una petición suelta, depende de lo que guardaron las anteri
 3. `POST /professionals` (con `serviceIds`) → guarda `professionalId`.
 4. `PUT /professionals/{id}/working-hours` (lunes a viernes 09:00–12:00 y 14:00–18:00).
 5. `POST /auth/login` como profesional → guarda `professionalToken`.
-6. `POST /auth/register` + `POST /auth/login` como cliente → guarda `clientToken`.
+6. `POST /auth/register` + `POST /auth/login` como cliente → guarda `token`.
 7. `GET /professionals/{id}/availability?date=...&serviceId=...` → guarda el primer `slots[0].start` en `slotStart`.
 8. `POST /appointments` con `startTime = {{slotStart}}` → **201**, guarda `appointmentId`.
 9. Repetir el paso 8 → **409** `SLOT_NOT_AVAILABLE`.
 10. `PATCH /appointments/{id}/confirm` con `professionalToken` → **200** `CONFIRMED`.
-11. `PATCH /appointments/{id}/cancel` con `clientToken` → **200** `CANCELLED` (o **422** si ya pasó la ventana).
+11. `PATCH /appointments/{id}/cancel` con `token` → **200** `CANCELLED` (o **422** si ya pasó la ventana).
 12. Casos negativos: sin token → **401** · cliente creando un servicio → **403** · body inválido → **400** · id inexistente → **404** · confirmar una cita cancelada → **409**.
 
 Para automatizarlo: *Collection Runner* de Postman, o `newman run postman/citas-api.postman_collection.json -e postman/local.postman_environment.json` en CI.
@@ -1932,17 +1950,40 @@ Para automatizarlo: *Collection Runner* de Postman, o `newman run postman/citas-
 
 ## 13. Documentación con Swagger/OpenAPI
 
+`OpenApiConfig` define tres cosas: los datos de la API, el esquema de seguridad `bearerAuth` y un `OpenApiCustomizer` que pone el cuerpo de `ApiError` (8.4) en **toda respuesta 4xx**.
+
 ```java
 @Configuration
-@OpenAPIDefinition(info = @Info(title = "Citas API", version = "v1",
-        description = "API REST para reserva de citas"))
+@OpenAPIDefinition(info = @Info(title = "Citas API", version = "v1", description = "..."))
 @SecurityScheme(name = "bearerAuth", type = SecuritySchemeType.HTTP, scheme = "bearer", bearerFormat = "JWT")
-public class OpenApiConfig {}
+public class OpenApiConfig {
+
+    @Bean
+    OpenApiCustomizer errorResponsesUseApiError() { ... }   // registra ApiError y lo asigna a cada 4xx
+}
 ```
 
-- Anota los controladores con `@Tag` y `@SecurityRequirement(name = "bearerAuth")`; los métodos, con `@Operation(summary = "...")` y `@ApiResponse` para los códigos de error.
-- UI: `/swagger-ui.html` · Especificación: `/v3/api-docs`. El botón **Authorize** permite pegar el JWT.
-- En `prod` Swagger queda deshabilitado (`application-prod.yml`).
+El customizer reemplaza siempre el contenido de las respuestas 4xx. Sin él, springdoc rellena las respuestas sin contenido con el tipo que devuelve el método, y un `404` de `GET /users/me` aparecería como un `UserResponse`.
+
+Cómo se anotan los controladores:
+
+- **`@Tag`**, uno por controlador: Auth, Usuarios, Servicios, Profesionales (también el horario laboral y la disponibilidad) y Citas.
+- **`@Operation(summary, description)`** en cada método.
+- **`@ApiResponse`**, uno por cada código posible. Los de error solo llevan el código y la descripción (p. ej. `409` → `SLOT_NOT_AVAILABLE`); el customizer les pone `ApiError`.
+- **`@SecurityRequirement(name = "bearerAuth")`**, solo en lo que pide token:
+  - a nivel de clase, en `UserController` y `AppointmentController`;
+  - a nivel de método, en las escrituras de servicios y profesionales y en el `PUT` del horario.
+
+  Lo público (registro, login, lecturas del catálogo, horario y disponibilidad) no lo lleva, y Swagger lo muestra sin candado.
+- **`@ResponseStatus(HttpStatus.CREATED)`** en los `POST` que crean, para que Swagger documente `201`. Es solo para la documentación: el `ResponseEntity` ya devuelve ese código.
+- **`@ParameterObject`** en los `Pageable`, para que `page`, `size` y `sort` aparezcan como parámetros sueltos.
+- **`@Schema`**, con descripción y ejemplo, en los DTO principales: `RegisterRequest`, `LoginRequest`, `AuthResponse`, `ServiceOfferingRequest`, `CreateAppointmentRequest` y `ApiError`.
+- En `application.yml`, `springdoc.default-produces-media-type: application/json` evita que las respuestas salgan como `*/*`.
+
+`OpenApiDocsTest` lee `/v3/api-docs` y falla si alguna de las 30 operaciones no coincide con 8.2. Revisa las rutas, los códigos, que los 4xx usen `ApiError` y que el candado esté solo donde corresponde.
+
+- UI: `/swagger-ui.html` · Especificación: `/v3/api-docs`. Para lo protegido: `POST /auth/login`, copia `accessToken` y pégalo en **Authorize**.
+- En `prod` Swagger queda deshabilitado (`application-prod.yml`): `/swagger-ui.html` y `/v3/api-docs` responden 404.
 
 ---
 
@@ -1951,42 +1992,87 @@ public class OpenApiConfig {}
 ### Dockerfile (multi-etapa)
 
 ```dockerfile
+# ---------- compilación ----------
 FROM eclipse-temurin:21-jdk AS build
 WORKDIR /app
 COPY .mvn/ .mvn/
 COPY mvnw pom.xml ./
-RUN ./mvnw -B -q dependency:go-offline
+RUN chmod +x mvnw && ./mvnw -B -q dependency:go-offline
 COPY src ./src
-RUN ./mvnw -B -q clean package -DskipTests
+RUN ./mvnw -B -q package -DskipTests -Djacoco.skip=true
 
+# ---------- ejecución ----------
 FROM eclipse-temurin:21-jre
 WORKDIR /app
-RUN addgroup --system app && adduser --system --ingroup app app
-COPY --from=build /app/target/*.jar app.jar
 ENV TZ=America/Bogota
+RUN groupadd --system app && useradd --system --gid app --no-create-home app
+COPY --from=build /app/target/*.jar app.jar
 USER app
 EXPOSE 8080
 ENTRYPOINT ["java", "-jar", "app.jar"]
 ```
+
+- **Dos etapas.** La primera compila con el JDK. La segunda solo lleva el JRE y el `.jar`, y corre con un usuario sin privilegios (`app`).
+- **Capa de dependencias.** `dependency:go-offline` va antes de copiar `src`, así que esa capa se reutiliza mientras `pom.xml` no cambie.
+- **Sin pruebas.** Las pruebas no corren al construir la imagen, porque necesitan Docker para Testcontainers; las corre el CI.
+- **`mvnw`.** Llega con fin de línea LF (`.gitattributes`) y con el bit de ejecución en Git. El `chmod` cubre un checkout que lo pierda.
+- **`.dockerignore`.** Es una lista blanca: solo entran `mvnw`, `.mvn/`, `pom.xml` y `src/`. Nunca llegan a la imagen `.env`, `.git`, `target`, `.claude` ni `postman`.
+
+**La API en Docker Compose (opcional).** El servicio `app` de `docker-compose.yml` está en el perfil `app`, así que `docker compose up -d` sigue levantando solo MySQL.
+
+```bash
+docker compose --profile app up -d --build
+```
+
+- Toma las variables de `.env` y les cambia `DB_HOST=mysql` y `DB_PORT=3306`, que son el servicio y el puerto dentro de la red de compose.
+- Publica la API en `127.0.0.1:${APP_PORT}` (8080 por defecto).
+- Corre con el perfil `prod` por defecto; `SPRING_PROFILES_ACTIVE` lo cambia.
+- Si `--build` falla con `failed to execute bake` (pasa con algunas versiones de Compose que construyen con *bake*), construye la imagen aparte con `docker build -t citas-api:local .` y luego corre `docker compose --profile app up -d`.
 
 ### CI con GitHub Actions
 
 ```yaml
 # .github/workflows/ci.yml
 name: CI
-on: [push, pull_request]
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest        # incluye Docker, necesario para Testcontainers
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-java@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
-          java-version: 21
+          java-version: '21'
           cache: maven
-      - run: ./mvnw -B verify
+      - name: Verify
+        run: ./mvnw -B verify
+      - name: Informe de cobertura
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: jacoco-report
+          path: target/site/jacoco
+          if-no-files-found: warn
 ```
+
+- **Cuándo corre.** En cada push a `main` o `develop` y en cada pull request. Una corrida nueva de la misma rama o PR cancela la anterior.
+- **Permisos.** Solo lectura del repositorio y sin secretos: las pruebas usan valores de prueba fijos en el código de test.
+- **Cobertura.** Sube el informe de JaCoCo como artefacto `jacoco-report`, también cuando `verify` falla.
+- **Versiones.** Las de las acciones (`checkout@v7`, `setup-java@v6`, `upload-artifact@v7`) se comprobaron contra sus releases oficiales.
 
 ### Producción
 
@@ -2015,17 +2101,17 @@ jobs:
 ## 16. Checklist final
 
 - [ ] Todos los endpoints de la sección 8 implementados y probados en Postman
-- [ ] Ningún endpoint devuelve entidades JPA ni contraseñas
-- [ ] Errores con formato uniforme (400/401/403/404/409/422/500)
-- [ ] Doble reserva imposible (prueba de concurrencia en verde)
-- [ ] Cada endpoint probado con rol permitido y no permitido
-- [ ] Migraciones Flyway versionadas y `ddl-auto: validate`
-- [ ] Sin secretos en el repositorio (`.env` ignorado, `.env.example` al día)
+- [x] Ningún endpoint devuelve entidades JPA ni contraseñas
+- [x] Errores con formato uniforme (400/401/403/404/409/422/500)
+- [x] Doble reserva imposible (prueba de concurrencia en verde)
+- [x] Cada endpoint probado con rol permitido y no permitido
+- [x] Migraciones Flyway versionadas y `ddl-auto: validate`
+- [x] Sin secretos en el repositorio (`.env` ignorado, `.env.example` al día)
 - [ ] `./mvnw verify` pasa localmente y en CI
 - [ ] Swagger UI muestra todos los endpoints
 - [ ] Colección y environment de Postman exportados en `/postman`
-- [ ] README actualizado (cómo correr, variables, usuarios de prueba)
-- [ ] Un tercero puede levantar el proyecto desde cero siguiendo este README
+- [x] README actualizado (cómo correr, variables, usuarios de prueba)
+- [ ] Un tercero puede levantar el proyecto desde cero siguiendo el README
 
 ---
 
@@ -2063,6 +2149,10 @@ jobs:
 - Caché de disponibilidad (Caffeine) y *rate limiting* en login.
 - Observabilidad: Micrometer + Prometheus/Grafana, trazas con identificador de petición.
 - Front-end (React, Angular o móvil) consumiendo el contrato OpenAPI.
+- CI más completo:
+  - correr la colección de Postman con Newman (hoy se corre a mano con *Collection Runner*);
+  - construir la imagen Docker y publicarla en un registro (p. ej. GitHub Container Registry) con un escaneo de vulnerabilidades.
+- `healthcheck` del servicio `app` en `docker-compose.yml`, contra `/actuator/health`.
 
 ---
 
