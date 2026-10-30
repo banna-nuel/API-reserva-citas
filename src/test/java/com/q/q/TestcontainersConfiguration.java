@@ -7,7 +7,7 @@ import org.testcontainers.mysql.MySQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
 @TestConfiguration(proxyBeanMethods = false)
-class TestcontainersConfiguration {
+public class TestcontainersConfiguration {             // pública: la importan también las pruebas de extremo a extremo
 
 	@Bean
 	@ServiceConnection

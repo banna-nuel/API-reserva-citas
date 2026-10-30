@@ -25,6 +25,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
@@ -212,6 +214,14 @@ class GlobalExceptionHandlerTest {
 		@Bean
 		Clock clock() {
 			return Clock.fixed(Instant.parse("2026-10-23T22:05:12.345Z"), ZoneId.of("America/Bogota"));
+		}
+
+		// Sin este bean, Spring Boot crearía un usuario en memoria y escribiría su contraseña generada en el log
+		@Bean
+		UserDetailsService userDetailsService() {
+			return username -> {
+				throw new UsernameNotFoundException("no hay usuarios en esta prueba");
+			};
 		}
 	}
 
