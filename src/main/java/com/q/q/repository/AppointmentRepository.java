@@ -10,10 +10,13 @@ import org.springframework.data.jpa.domain.Specification;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import com.q.q.entity.Appointment;
+
+import jakarta.persistence.LockModeType;
 
 public interface AppointmentRepository extends JpaRepository<Appointment, Long>, JpaSpecificationExecutor<Appointment> {
 
@@ -62,5 +65,18 @@ public interface AppointmentRepository extends JpaRepository<Appointment, Long>,
 
 	@EntityGraph(attributePaths = { "client", "professional", "professional.user", "service" })
 	Optional<Appointment> findWithDetailsById(Long id);
+
+	// SELECT ... FOR UPDATE de la cita sola, sin joins: no bloquea filas de otras tablas. Los cambios de estado la
+	// bloquean y revisan su estado dentro de la transacción, así dos operaciones simultáneas no se pisan
+	@Lock(LockModeType.PESSIMISTIC_WRITE)
+	@Query("select a from Appointment a where a.id = :id")
+	Optional<Appointment> findByIdForUpdate(@Param("id") Long id);
+
+	// Sin bloquear ni cargar la cita: reschedule necesita saber a quién bloquear antes de bloquearla a ella
+	@Query("""
+			select new com.q.q.repository.AppointmentParties(a.id, a.professional.id, a.client.id)
+			from Appointment a where a.id = :id
+			""")
+	Optional<AppointmentParties> findPartiesById(@Param("id") Long id);
 
 }

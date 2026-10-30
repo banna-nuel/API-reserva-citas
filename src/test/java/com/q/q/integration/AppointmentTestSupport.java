@@ -1,5 +1,6 @@
 package com.q.q.integration;
 
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -12,16 +13,26 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultActions;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
 import com.jayway.jsonpath.JsonPath;
 import com.q.q.TestClockConfiguration;
 import com.q.q.entity.Appointment;
 import com.q.q.entity.enums.AppointmentStatus;
 import com.q.q.repository.AppointmentRepository;
+import com.q.q.repository.ProfessionalRepository;
+import com.q.q.repository.ServiceOfferingRepository;
 
 /** Catálogo, clientes y reservas para las pruebas de citas. El reloj de la aplicación está fijo en TestClockConfiguration. */
 abstract class AppointmentTestSupport extends IntegrationTestSupport {
@@ -39,6 +50,12 @@ abstract class AppointmentTestSupport extends IntegrationTestSupport {
 
 	@Autowired
 	protected AppointmentRepository appointments;
+
+	@Autowired
+	private ProfessionalRepository professionals;
+
+	@Autowired
+	private ServiceOfferingRepository services;
 
 	protected record Catalog(String admin, Long professionalId, Long professionalUserId, String professionalEmail,
 			Long serviceId) {}
@@ -126,11 +143,60 @@ abstract class AppointmentTestSupport extends IntegrationTestSupport {
 		return JsonPath.<Number>read(created, "$.id").longValue();
 	}
 
-	// Los cambios de estado llegan en la Fase 6b: aquí se aplican directamente en la base
+	// Cambia el estado directamente en la base, sin pasar por las reglas de la API
 	protected void setStatus(Long appointmentId, AppointmentStatus status) {
 		Appointment appointment = appointments.findById(appointmentId).orElseThrow();
 		appointment.setStatus(status);
 		appointments.save(appointment);
+	}
+
+	// Inserción directa: permite estados y horarios que la API no dejaría crear (p. ej. citas que ya empezaron)
+	protected Long insert(Catalog catalog, Long clientId, LocalDateTime start, int minutes, AppointmentStatus status) {
+		Appointment appointment = new Appointment();
+		appointment.setClient(users.findById(clientId).orElseThrow());
+		appointment.setProfessional(professionals.findById(catalog.professionalId()).orElseThrow());
+		appointment.setService(services.findById(catalog.serviceId()).orElseThrow());
+		appointment.setStartTime(start);
+		appointment.setEndTime(start.plusMinutes(minutes));
+		appointment.setStatus(status);
+		appointment.setPrice(new BigDecimal("50000.00"));
+		return appointments.save(appointment).getId();
+	}
+
+	// PATCH /appointments/{id}/{action}; body null = sin body
+	protected ResultActions change(String token, Object appointmentId, String action, Object requestBody)
+			throws Exception {
+		MockHttpServletRequestBuilder request = patch(APPOINTMENTS + "/" + appointmentId + "/" + action);
+		return mvc.perform(requestBody == null ? authorized(request, token) : withJson(request, token, requestBody));
+	}
+
+	protected AppointmentStatus statusOf(Long appointmentId) {
+		return appointments.findById(appointmentId).orElseThrow().getStatus();
+	}
+
+	// Lanza todas las peticiones a la vez y devuelve, de cada una, "200" o "201" si salió bien, o "código code"
+	protected List<String> race(List<Callable<ResultActions>> requests) throws Exception {
+		ExecutorService pool = Executors.newFixedThreadPool(requests.size());
+		CountDownLatch start = new CountDownLatch(1);
+		try {
+			List<Future<String>> futures = new ArrayList<>();
+			for (Callable<ResultActions> request : requests) {
+				futures.add(pool.submit(() -> {
+					start.await();
+					MvcResult result = request.call().andReturn();
+					int code = result.getResponse().getStatus();
+					return code < 300 ? String.valueOf(code) : code + " " + JsonPath.read(body(result), "$.code");
+				}));
+			}
+			start.countDown();
+			List<String> outcomes = new ArrayList<>();
+			for (Future<String> future : futures) {
+				outcomes.add(future.get(60, TimeUnit.SECONDS));
+			}
+			return outcomes;
+		} finally {
+			pool.shutdownNow();
+		}
 	}
 
 }

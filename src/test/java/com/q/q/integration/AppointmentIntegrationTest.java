@@ -11,18 +11,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.Callable;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.web.servlet.ResultActions;
 
 import com.jayway.jsonpath.JsonPath;
 import com.q.q.IntegrationTest;
@@ -309,7 +305,9 @@ class AppointmentIntegrationTest extends AppointmentTestSupport {
 		}
 		for (int round = 0; round < 6; round++) {
 			LocalDateTime start = THURSDAY.atTime(9, 0).plusMinutes(30L * round);
-			List<String> outcomes = race(clients.stream().map(token -> new Attempt(token, booking(catalog, start))).toList());
+			List<String> outcomes = race(clients.stream()
+					.map(token -> (Callable<ResultActions>) () -> book(token, booking(catalog, start)))
+					.toList());
 
 			assertThat(outcomes).as("ronda %d", round).containsExactlyInAnyOrder(
 					"201", "409 SLOT_NOT_AVAILABLE", "409 SLOT_NOT_AVAILABLE", "409 SLOT_NOT_AVAILABLE",
@@ -327,39 +325,12 @@ class AppointmentIntegrationTest extends AppointmentTestSupport {
 		Client client = newClient();
 		for (int round = 0; round < 6; round++) {
 			LocalDateTime start = FRIDAY.atTime(14, 0).plusMinutes(30L * round);
-			List<String> outcomes = race(List.of(new Attempt(client.token(), booking(first, start)),
-					new Attempt(client.token(), booking(second, start))));
+			List<String> outcomes = race(List.of(() -> book(client.token(), booking(first, start)),
+					() -> book(client.token(), booking(second, start))));
 
 			assertThat(outcomes).as("ronda %d", round).containsExactlyInAnyOrder("201", "409 CLIENT_OVERLAP");
 			assertThat(appointments.countOverlappingForClient(client.id(), start, start.plusMinutes(30), null))
 					.as("ronda %d", round).isEqualTo(1);
-		}
-	}
-
-	private record Attempt(String token, Map<String, Object> body) {}
-
-	// Lanza todas las reservas a la vez y devuelve "201" o "código code" de cada una
-	private List<String> race(List<Attempt> attempts) throws Exception {
-		ExecutorService pool = Executors.newFixedThreadPool(attempts.size());
-		CountDownLatch start = new CountDownLatch(1);
-		try {
-			List<Future<String>> futures = new ArrayList<>();
-			for (Attempt attempt : attempts) {
-				futures.add(pool.submit(() -> {
-					start.await();
-					MvcResult result = book(attempt.token(), attempt.body()).andReturn();
-					int code = result.getResponse().getStatus();
-					return code == 201 ? "201" : code + " " + JsonPath.read(body(result), "$.code");
-				}));
-			}
-			start.countDown();
-			List<String> outcomes = new ArrayList<>();
-			for (Future<String> future : futures) {
-				outcomes.add(future.get(60, TimeUnit.SECONDS));
-			}
-			return Collections.unmodifiableList(outcomes);
-		} finally {
-			pool.shutdownNow();
 		}
 	}
 
