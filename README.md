@@ -1363,35 +1363,82 @@ public enum AppointmentStatus {
 
 ### 10.2 Repositorios
 
+Las firmas reales que usan las citas y la disponibilidad:
+
 ```java
 public interface ProfessionalRepository extends JpaRepository<Professional, Long> {
 
-    @Lock(LockModeType.PESSIMISTIC_WRITE)       // SELECT ... FOR UPDATE
+    @Lock(LockModeType.PESSIMISTIC_WRITE)                       // SELECT ... FOR UPDATE
     @Query("select p from Professional p where p.id = :id")
     Optional<Professional> findByIdForUpdate(@Param("id") Long id);
+}
+
+public interface UserRepository extends JpaRepository<User, Long> {
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)                       // el cliente, siempre después del profesional
+    @Query("select u from User u where u.id = :id")
+    Optional<User> findByIdForUpdate(@Param("id") Long id);
+}
+
+public interface WorkingHourRepository extends JpaRepository<WorkingHour, Long> {
+
+    List<WorkingHour> findByProfessionalIdAndDayOfWeek(Long professionalId, DayOfWeek dayOfWeek);
 }
 
 public interface AppointmentRepository
         extends JpaRepository<Appointment, Long>, JpaSpecificationExecutor<Appointment> {
 
+    // Disponibilidad: citas activas del profesional que solapan [start, end) (se le pide el día completo)
+    @Query("""
+        select a from Appointment a
+        where a.professional.id = :professionalId
+          and a.status in (com.q.q.entity.enums.AppointmentStatus.PENDING,
+                           com.q.q.entity.enums.AppointmentStatus.CONFIRMED)
+          and a.startTime < :end and a.endTime > :start
+        """)
+    List<Appointment> findActiveOverlapping(@Param("professionalId") Long professionalId,
+                                            @Param("start") LocalDateTime start,
+                                            @Param("end") LocalDateTime end);
+
+    // RN-02. excludeId: la propia cita al reprogramar (RN-12); null al crear
     @Query("""
         select count(a) from Appointment a
         where a.professional.id = :professionalId
-          and a.status in :statuses
+          and a.status in (com.q.q.entity.enums.AppointmentStatus.PENDING,
+                           com.q.q.entity.enums.AppointmentStatus.CONFIRMED)
           and a.startTime < :end and a.endTime > :start
           and (:excludeId is null or a.id <> :excludeId)
         """)
-    long countOverlapping(@Param("professionalId") Long professionalId,
-                          @Param("statuses") Collection<AppointmentStatus> statuses,
-                          @Param("start") LocalDateTime start,
-                          @Param("end") LocalDateTime end,
-                          @Param("excludeId") Long excludeId);
+    long countOverlapping(@Param("professionalId") Long professionalId, @Param("start") LocalDateTime start,
+                          @Param("end") LocalDateTime end, @Param("excludeId") Long excludeId);
 
-    // countOverlappingForClient(...): igual, pero con "a.client.id = :clientId"  (RN-06)
+    // RN-06: la misma consulta con "a.client.id = :clientId" en lugar del profesional
+    long countOverlappingForClient(@Param("clientId") Long clientId, @Param("start") LocalDateTime start,
+                                   @Param("end") LocalDateTime end, @Param("excludeId") Long excludeId);
+
+    // GET /appointments: cliente, profesional con su usuario y servicio llegan en la misma consulta
+    @Override
+    @EntityGraph(attributePaths = { "client", "professional", "professional.user", "service" })
+    Page<Appointment> findAll(Specification<Appointment> spec, Pageable pageable);
+
+    @EntityGraph(attributePaths = { "client", "professional", "professional.user", "service" })
+    Optional<Appointment> findWithDetailsById(Long id);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)                       // la cita sola, sin joins
+    @Query("select a from Appointment a where a.id = :id")
+    Optional<Appointment> findByIdForUpdate(@Param("id") Long id);
+
+    // Profesional y cliente de una cita, sin cargarla ni bloquearla (reschedule)
+    @Query("""
+        select new com.q.q.repository.AppointmentParties(a.id, a.professional.id, a.client.id)
+        from Appointment a where a.id = :id
+        """)
+    Optional<AppointmentParties> findPartiesById(@Param("id") Long id);
 }
 ```
 
-Para los filtros opcionales de `GET /appointments` usa `Specification` (`JpaSpecificationExecutor`) en lugar de escribir una consulta por combinación.
+- Las citas activas (`PENDING` y `CONFIRMED`) van fijas en las consultas, no como parámetro.
+- Los filtros opcionales de `GET /appointments` son `Specification` de `AppointmentSpecifications` (`clientIs`, `professionalUserIs`, `professionalIs`, `statusIs`, `startsAtOrAfter`, `startsBefore`), combinadas con `Specification.allOf`: no hace falta una consulta por combinación.
 
 ### 10.3 DTOs y paginación
 
@@ -1416,75 +1463,55 @@ public record PageResponse<T>(List<T> content, int page, int size, long totalEle
 }
 ```
 
-### 10.4 Servicio: crear una cita (aplica RN-01 a RN-09)
+### 10.4 Servicio de citas: `AppointmentService`
 
-```java
-@Service
-@RequiredArgsConstructor
-public class AppointmentService {
+`com.q.q.service.AppointmentService` aplica RN-01 a RN-13; los códigos de error y su orden están en 8.3.
 
-    private static final List<AppointmentStatus> ACTIVE =
-            List.of(AppointmentStatus.PENDING, AppointmentStatus.CONFIRMED);
+- Todas las escrituras corren en `@Transactional(isolation = Isolation.READ_COMMITTED)`. Así, un conteo de solapes hecho después de un bloqueo ve lo que la otra transacción ya confirmó.
+- Las filas se bloquean siempre en el mismo orden: profesional → cliente → cita. Con un orden fijo no hay deadlocks.
 
-    private final AppointmentRepository appointments;
-    private final ProfessionalRepository professionals;
-    private final ServiceOfferingRepository services;
-    private final UserRepository users;
-    private final WorkingHourService workingHours;
-    private final AppointmentMapper mapper;
-    private final AppProperties props;
-    private final Clock clock;
+**Crear** (`create`):
 
-    // READ_COMMITTED + bloqueo de fila: si dos clientes reservan a la vez, el segundo
-    // espera a que termine el primero y entonces ya "ve" su cita.
-    @Transactional(isolation = Isolation.READ_COMMITTED)
-    public AppointmentResponse create(CreateAppointmentRequest req, Long clientId) {
+1. El actor debe ser CLIENT o ADMIN (defensa en profundidad: la regla por URL ya lo exige).
+2. `professionals.findByIdForUpdate(professionalId)` bloquea al profesional. Si no existe o no es visible (`isPubliclyVisible`: perfil y usuario activos) → `404`.
+3. `requireOffered(professional, serviceId)`: servicio activo (`404`) y ofrecido por el profesional (`422 SERVICE_NOT_OFFERED`, RN-05).
+4. `lockClient(actor, clientId)` bloquea al cliente con `users.findByIdForUpdate`:
+   - para un CLIENT, él mismo;
+   - para el ADMIN, el `clientId` (un CLIENT activo; si no, `422 INVALID_CLIENT_ID`) o, si lo omite, él mismo.
+5. `checkSlot(professionalId, clientId, start, durationMinutes, null)`, que devuelve el fin.
+6. Guarda la cita en `PENDING` con `price = service.getPrice()` (RN-09).
 
-        // 1) Bloquear primero al profesional
-        Professional professional = professionals.findByIdForUpdate(req.professionalId())
-                .orElseThrow(() -> new ResourceNotFoundException("Profesional no encontrado"));
-        ServiceOffering service = services.findById(req.serviceId())
-                .orElseThrow(() -> new ResourceNotFoundException("Servicio no encontrado"));
+**`checkSlot`**, compartido por la creación y la reprogramación, en este orden:
 
-        // 2) Reglas de negocio
-        if (!professional.isActive() || !service.isActive() || !professional.offers(service)) {
-            throw new BusinessRuleException("SERVICE_NOT_OFFERED", "El profesional no ofrece este servicio");
-        }
-        LocalDateTime now = LocalDateTime.now(clock);
-        LocalDateTime start = req.startTime();
-        LocalDateTime end = start.plusMinutes(service.getDurationMinutes());          // RN-01
+1. `BookingWindow` → `422 TOO_SOON` o `422 TOO_FAR` (RN-04).
+2. `end = start + durationMinutes` (RN-01). Se calcula después del paso 1, para que una fecha extrema no desborde.
+3. Los tramos del día salen de `WorkingHourService.workingRanges`, con los bloques contiguos fusionados. Si ninguno cumple `fits(start, end)` → `422 OUTSIDE_WORKING_HOURS` (RN-03).
+4. Si `start` no está entre los `TimeRange.candidateSlots` de esos tramos (el mismo cálculo de la disponibilidad) → `422 INVALID_SLOT_START`.
+5. `appointments.countOverlapping(professionalId, start, end, excludeId) > 0` → `409 SLOT_NOT_AVAILABLE` (RN-02).
+6. `appointments.countOverlappingForClient(clientId, start, end, excludeId) > 0` → `409 CLIENT_OVERLAP` (RN-06).
 
-        if (start.isBefore(now.plusMinutes(props.booking().minNoticeMinutes()))) {
-            throw new BusinessRuleException("TOO_SOON", "La cita requiere más anticipación");
-        }
-        if (start.isAfter(now.plusDays(props.booking().maxDaysAhead()))) {
-            throw new BusinessRuleException("TOO_FAR", "No se permiten reservas tan lejanas");
-        }
-        if (!workingHours.fits(professional.getId(), start, end)) {                   // RN-03
-            throw new BusinessRuleException("OUTSIDE_WORKING_HOURS", "Fuera de la jornada del profesional");
-        }
-        if (appointments.countOverlapping(professional.getId(), ACTIVE, start, end, null) > 0) {   // RN-02
-            throw new ConflictException("SLOT_NOT_AVAILABLE", "El profesional ya tiene una cita en ese horario");
-        }
-        if (appointments.countOverlappingForClient(clientId, ACTIVE, start, end, null) > 0) {      // RN-06
-            throw new ConflictException("CLIENT_OVERLAP", "Ya tienes una cita en ese horario");
-        }
+**Confirmar, completar, no-show y cancelar** (`confirm`, `complete`, `markNoShow`, `cancel`):
 
-        // 3) Persistir con el precio congelado (RN-09)
-        Appointment a = new Appointment();
-        a.setClient(users.getReferenceById(clientId));
-        a.setProfessional(professional);
-        a.setService(service);
-        a.setStartTime(start);
-        a.setEndTime(end);
-        a.setPrice(service.getPrice());
-        a.setNotes(req.notes());
-        return mapper.toResponse(appointments.save(a));
-    }
-}
-```
+1. `appointments.findByIdForUpdate(id)` bloquea solo la cita.
+   - `canSee` decide quién la ve: su cliente (solo cuenta en `cancel`), el profesional asignado o el ADMIN. Para cualquier otro → `404` (RN-13).
+   - `confirm`, `complete` y `markNoShow` rechazan además a un CLIENT con `403` (defensa en profundidad).
+2. Si `status.canTransitionTo(destino)` es falso → `409 INVALID_STATUS_TRANSITION` (RN-07).
+3. Reglas de hora:
+   - `complete` y `markNoShow` con `ahora < startTime` → `422 APPOINTMENT_NOT_STARTED`;
+   - `cancel` de un CLIENT con `ahora > startTime - cancel-limit-hours` → `422 CANCELLATION_WINDOW_CLOSED` (RN-08).
+4. Cambia el estado; al cancelar, también guarda `cancelReason`.
 
-Para cancelar, confirmar o completar: carga la cita, comprueba pertenencia (RN-13), comprueba `status.canTransitionTo(nuevo)` (si no, `ConflictException` con `INVALID_STATUS_TRANSITION`) y aplica RN-08 en la cancelación del cliente.
+**Reprogramar** (`reschedule`):
+
+1. El actor debe ser CLIENT o ADMIN.
+2. `appointments.findPartiesById(id)` lee el profesional y el cliente sin bloquear ni cargar la cita. Un CLIENT que no es el dueño → `404`.
+3. Bloquea con `professionals.findByIdForUpdate`, después con `users.findByIdForUpdate` (el cliente de la cita) y por último con `appointments.findByIdForUpdate(id)`, que vuelve a leer la cita.
+4. Si la cita no está `PENDING` ni `CONFIRMED` → `409 INVALID_STATUS_TRANSITION`.
+5. Un CLIENT con la ventana cerrada respecto al inicio actual → `422 RESCHEDULE_WINDOW_CLOSED`.
+6. El mismo `startTime` que ya tiene → `422 SAME_START_TIME`.
+7. Profesional visible (`404`) y `requireOffered` (`404` o `422`).
+8. `checkSlot(..., durationMinutes = fin actual − inicio actual, excludeId = id)` (RN-12).
+9. Actualiza el inicio y el fin; el estado y el precio no cambian.
 
 ### 10.5 Algoritmo de disponibilidad
 
