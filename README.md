@@ -1872,6 +1872,43 @@ pm.test("Estado inicial PENDING", () => pm.expect(pm.response.json().status).to.
 pm.environment.set("appointmentId", pm.response.json().id);
 ```
 
+**Colección y environment listos para importar**
+
+Están en `postman/`:
+
+- `citas-api.postman_collection.json`: la colección "Citas API" (formato v2.1.0), con 33 peticiones en tres carpetas que se corren en este orden: Auth (6), Servicios (12) y Flujo (15). Cada petición declara su propia autorización (Bearer con la variable del rol que toca, o sin auth) y lleva su test.
+- `local.postman_environment.json`: el environment "Citas API (local)".
+
+Para importarlos: en Postman, *Import* → arrastra los dos archivos. Después elige el environment "Citas API (local)" en el selector de arriba a la derecha.
+
+Variables que debes completar en el environment (las demás las escriben los scripts):
+
+| Variable | Valor |
+|---|---|
+| `baseUrl` | Viene con `http://localhost:8080/api/v1`. Si la app corre en otro puerto (p. ej. `APP_PORT=8081` en `.env`), cámbialo. |
+| `adminEmail` | El `ADMIN_EMAIL` de tu `.env`. Es de tipo *secret* y viene vacía. |
+| `adminPassword` | El `ADMIN_PASSWORD` de tu `.env`. Es de tipo *secret* y viene vacía. |
+
+- `password` (`Clave12345`) es la contraseña de los clientes y profesionales que crea la colección; no hace falta cambiarla.
+- `token`, `adminToken` y `professionalToken` son de tipo *default*, no *secret*, para que Postman no las mueva a su bóveda y se desincronicen entre peticiones.
+
+Para correrla con *Collection Runner*:
+
+1. Levanta la API (sección 7.6) con MySQL en marcha.
+2. En la colección "Citas API", pulsa *Run*.
+3. Elige el environment "Citas API (local)", deja el orden por defecto, todas las peticiones marcadas y 1 iteración.
+4. Pulsa *Run Citas API*: las 33 peticiones deben terminar en verde.
+
+La colección se corre completa y en orden, porque los scripts encadenan los datos:
+
+- el registro guarda `email`;
+- los logins guardan `token`, `adminToken` y `professionalToken`;
+- las altas guardan `serviceId` y `professionalId`;
+- la disponibilidad guarda `bookDate` (el próximo lunes) y `slotStart`;
+- la reserva guarda `appointmentId`.
+
+Una carpeta sola, o una petición suelta, depende de lo que guardaron las anteriores. Cada corrida crea un cliente, un servicio y un profesional nuevos, con nombres y emails únicos, así que se puede repetir sin limpiar la base.
+
 ### 12.3 Flujo de prueba completo (smoke test)
 
 1. `POST /auth/login` como ADMIN → guarda `adminToken`.
