@@ -1266,8 +1266,8 @@ Se hace en dos partes: Fase 6a (crear, leer y concurrencia) y Fase 6b (cambios d
 
 **Fase 6b — Cambios de estado**
 
-- [ ] `AppointmentStatus.canTransitionTo` (RN-07)
-- [ ] `confirm`, `complete`, `cancel` (RN-08), `reschedule` (RN-12) y `no-show`, bloqueando también primero al profesional y después al cliente
+- [x] `AppointmentStatus.canTransitionTo` (RN-07)
+- [x] `confirm`, `complete`, `cancel` (RN-08), `reschedule` (RN-12) y `no-show`, bloqueando también primero al profesional y después al cliente
 
 **Listo cuando:** el flujo completo de la sección 12.3 pasa en Postman, incluidos los casos negativos.
 
