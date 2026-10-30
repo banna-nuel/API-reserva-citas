@@ -2,27 +2,16 @@ package com.q.q.integration;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 
 import com.q.q.IntegrationTest;
-import com.q.q.entity.Appointment;
 import com.q.q.entity.enums.AppointmentStatus;
-import com.q.q.repository.ProfessionalRepository;
-import com.q.q.repository.ServiceOfferingRepository;
 
 // Las consultas de solape contra MySQL real: límites estrictos (RN-02), solo citas activas y excludeId (Fase 6b)
 @IntegrationTest
 class AppointmentRepositoryIntegrationTest extends AppointmentTestSupport {
-
-	@Autowired
-	private ProfessionalRepository professionals;
-
-	@Autowired
-	private ServiceOfferingRepository services;
 
 	@Test
 	void countOverlappingUsesStrictBoundsOnlyActiveStatusesAndTheExcludedId() throws Exception {
@@ -72,19 +61,6 @@ class AppointmentRepositoryIntegrationTest extends AppointmentTestSupport {
 
 	private static LocalDateTime at(int hour, int minute) {
 		return THURSDAY.atTime(hour, minute);
-	}
-
-	// Inserción directa: permite estados y horarios que la API no dejaría crear
-	private Long insert(Catalog catalog, Long clientId, LocalDateTime start, int minutes, AppointmentStatus status) {
-		Appointment appointment = new Appointment();
-		appointment.setClient(users.findById(clientId).orElseThrow());
-		appointment.setProfessional(professionals.findById(catalog.professionalId()).orElseThrow());
-		appointment.setService(services.findById(catalog.serviceId()).orElseThrow());
-		appointment.setStartTime(start);
-		appointment.setEndTime(start.plusMinutes(minutes));
-		appointment.setStatus(status);
-		appointment.setPrice(new BigDecimal("50000.00"));
-		return appointments.save(appointment).getId();
 	}
 
 }
