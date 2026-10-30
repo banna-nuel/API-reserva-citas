@@ -1272,9 +1272,9 @@ Se hace en dos partes: Fase 6a (crear, leer y concurrencia) y Fase 6b (cambios d
 **Listo cuando:** el flujo completo de la sección 12.3 pasa en Postman, incluidos los casos negativos.
 
 ### Fase 7 — Calidad
-- [ ] Pruebas unitarias de todos los `service` (≥ 70 %)
-- [ ] Pruebas de repositorio con Testcontainers
-- [ ] Pruebas de controlador (`@WebMvcTest`) y 1–2 pruebas de integración de extremo a extremo
+- [x] Pruebas unitarias de todos los `service` (≥ 70 %)
+- [x] Pruebas de repositorio con Testcontainers
+- [x] Pruebas de controlador (`@WebMvcTest`) y 1–2 pruebas de integración de extremo a extremo
 - [ ] Tests automáticos en Postman y ejecución con Collection Runner
 
 **Listo cuando:** `./mvnw verify` termina en verde.
