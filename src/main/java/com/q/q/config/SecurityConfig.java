@@ -56,6 +56,11 @@ public class SecurityConfig {
 				.requestMatchers(HttpMethod.PUT, "/api/v1/professionals/*/working-hours").hasAnyRole("ADMIN", "PROFESSIONAL")
 				// Reservar: un PROFESSIONAL recibe 403 antes de validar el body
 				.requestMatchers(HttpMethod.POST, "/api/v1/appointments").hasAnyRole("CLIENT", "ADMIN")
+				// Cambios de estado: el rol se corta aquí; el dueño o el profesional asignado, en el servicio (cancel
+				// admite a cualquier autenticado y cae en la regla general de abajo)
+				.requestMatchers(HttpMethod.PATCH, "/api/v1/appointments/*/confirm", "/api/v1/appointments/*/complete",
+						"/api/v1/appointments/*/no-show").hasAnyRole("PROFESSIONAL", "ADMIN")
+				.requestMatchers(HttpMethod.PATCH, "/api/v1/appointments/*/reschedule").hasAnyRole("CLIENT", "ADMIN")
 				.requestMatchers("/api/v1/auth/**", "/actuator/health/**").permitAll()
 				.requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
 				.requestMatchers(HttpMethod.GET, "/api/v1/services/**", "/api/v1/professionals/**").permitAll()
