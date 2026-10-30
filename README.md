@@ -623,15 +623,23 @@ Sin token o con un rol distinto de ADMIN, las lecturas solo muestran profesional
 | POST | `/appointments` | Crear cita (el ADMIN puede reservar en nombre de un cliente con `clientId`) | CLIENT, ADMIN | 201 |
 | GET | `/appointments` | Listar según rol (paginado; `?status=&from=&to=&professionalId=&page=&size=&sort=`) | Autenticado | 200 |
 | GET | `/appointments/{id}` | Detalle | Dueño, profesional asignado, ADMIN | 200 |
-| PATCH | `/appointments/{id}/confirm` | Confirmar | Profesional asignado, ADMIN | 200 |
-| PATCH | `/appointments/{id}/complete` | Marcar completada | Profesional asignado, ADMIN | 200 |
-| PATCH | `/appointments/{id}/cancel` | Cancelar (`{ "reason": "..." }`) | Dueño, profesional asignado, ADMIN | 200 |
-| PATCH | `/appointments/{id}/reschedule` | Reprogramar (`{ "startTime": "..." }`) | Dueño, ADMIN | 200 |
-| PATCH | `/appointments/{id}/no-show` | Marcar inasistencia | Profesional asignado, ADMIN | 200 |
+| PATCH | `/appointments/{id}/confirm` | Confirmar (`PENDING` → `CONFIRMED`) | Profesional asignado, ADMIN | 200 |
+| PATCH | `/appointments/{id}/complete` | Marcar completada (`CONFIRMED` → `COMPLETED`, ya empezada) | Profesional asignado, ADMIN | 200 |
+| PATCH | `/appointments/{id}/cancel` | Cancelar (body opcional `{ "reason": "..." }`) | Dueño, profesional asignado, ADMIN | 200 |
+| PATCH | `/appointments/{id}/reschedule` | Reprogramar (`{ "startTime": "..." }`; el estado no cambia) | Dueño (CLIENT), ADMIN | 200 |
+| PATCH | `/appointments/{id}/no-show` | Marcar inasistencia (`CONFIRMED` → `NO_SHOW`, ya empezada) | Profesional asignado, ADMIN | 200 |
 
 `GET /appointments` devuelve: al CLIENT, solo sus citas; al PROFESSIONAL, las de su agenda; al ADMIN, todas.
 
 `POST /appointments` exige CLIENT o ADMIN también por URL en `SecurityConfig`: un PROFESSIONAL recibe `403` antes de que se valide el body. Crear y leer llegan en la Fase 6a; los cambios de estado (`confirm`, `complete`, `cancel`, `reschedule`, `no-show`), en la Fase 6b.
+
+Los cambios de estado también tienen regla por URL:
+
+- `confirm`, `complete` y `no-show` exigen PROFESSIONAL o ADMIN: un CLIENT recibe `403` antes que cualquier otra cosa.
+- `reschedule` exige CLIENT o ADMIN: un PROFESSIONAL recibe `403`.
+- `cancel` admite a cualquier usuario autenticado.
+
+Que sea el dueño o el profesional asignado se comprueba en el servicio: si no lo es, recibe `404` (RN-13).
 
 ### 8.3 Ejemplos
 
@@ -991,6 +999,87 @@ Detalle → `GET /api/v1/appointments/{id}` (autenticado) → `200` con la cita.
 - Para cualquier otro usuario, o si no existe → `404 RESOURCE_NOT_FOUND`: no se revela que existe (RN-13).
 - `{id}` que no sea un número → `400 INVALID_PARAMETER`.
 
+**Cambios de estado** (Fase 6b)
+
+Los cinco `PATCH` responden `200` con la cita actualizada, en el mismo formato que el alta. Siguen el diagrama de la sección 4.4 (RN-07):
+
+| Desde | Puede pasar a |
+|---|---|
+| `PENDING` | `CONFIRMED`, `CANCELLED` |
+| `CONFIRMED` | `COMPLETED`, `CANCELLED`, `NO_SHOW` |
+| `COMPLETED`, `CANCELLED`, `NO_SHOW` | Ninguno: son estados finales |
+
+Cualquier otro cambio → `409 INVALID_STATUS_TRANSITION`. Por ejemplo: confirmar dos veces, completar una cita `PENDING`, cancelar una `COMPLETED` o marcar inasistencia en una `PENDING`.
+
+Confirmar → `PATCH /api/v1/appointments/{id}/confirm` (profesional asignado o ADMIN), sin body: `PENDING` → `CONFIRMED`. No tiene restricción de hora.
+
+Completar → `PATCH /api/v1/appointments/{id}/complete`, y marcar inasistencia → `PATCH /api/v1/appointments/{id}/no-show` (profesional asignado o ADMIN), sin body:
+
+- Pasan de `CONFIRMED` a `COMPLETED` o a `NO_SHOW`.
+- Solo valen cuando la cita ya empezó (`ahora >= startTime`). Antes → `422 APPOINTMENT_NOT_STARTED`.
+
+Cancelar → `PATCH /api/v1/appointments/{id}/cancel` (su cliente, el profesional asignado o el ADMIN), con un body opcional:
+
+```json
+{ "reason": "No puedo asistir" }
+```
+
+- `reason`: opcional. Se quitan los espacios sobrantes, lo que queda puede tener hasta 255 caracteres, y si queda vacío se guarda `null`. Se devuelve en `cancelReason`.
+- Sin body, o con `{}`, la cita se cancela sin motivo.
+- RN-08: un CLIENT cancela solo hasta `cancel-limit-hours` horas (2 por defecto) antes del inicio, ese instante incluido.
+  - Con una cita a las 10:00, puede cancelar hasta las 08:00 en punto; a las 08:01 → `422 CANCELLATION_WINDOW_CLOSED`.
+  - El profesional asignado y el ADMIN no tienen límite.
+- Una cita cancelada deja libre su horario: se puede volver a reservar.
+
+Reprogramar → `PATCH /api/v1/appointments/{id}/reschedule` (su cliente o el ADMIN; un PROFESSIONAL recibe `403`):
+
+```json
+{ "startTime": "2026-11-06T09:30:00" }
+```
+
+- `startTime` es obligatorio y tiene el formato de la creación: hora local del negocio, sin zona.
+- Solo se reprograman citas `PENDING` o `CONFIRMED`; si no → `409 INVALID_STATUS_TRANSITION`.
+- El estado no cambia, porque RN-07 no tiene `CONFIRMED` → `PENDING`, y el precio sigue congelado (RN-09).
+- La cita conserva su duración original: `endTime = nuevo startTime + (endTime - startTime)`, aunque el servicio haya cambiado de duración después.
+- RN-12: el nuevo horario pasa exactamente las mismas comprobaciones de la creación, con los mismos códigos.
+  - Se calculan con la duración original de la cita.
+  - La propia cita no cuenta en los solapes del profesional ni del cliente: se puede mover a un horario que se pisa con el suyo anterior.
+- Un `startTime` igual al actual → `422 SAME_START_TIME`.
+- Un CLIENT solo reprograma hasta `cancel-limit-hours` horas antes del inicio **actual** de la cita, la misma ventana de RN-08. Después → `422 RESCHEDULE_WINDOW_CLOSED`. El ADMIN no tiene límite.
+
+Orden de comprobaciones de los cinco `PATCH` (gana la primera que falla):
+
+1. Token y rol, por la regla de URL → `401 AUTHENTICATION_REQUIRED` o `403 ACCESS_DENIED`.
+2. Body (`cancel` y `reschedule`) → `400 VALIDATION_ERROR` o `400 MALFORMED_REQUEST`.
+3. La cita no existe, o quien llama no es su cliente, su profesional asignado ni ADMIN → `404 RESOURCE_NOT_FOUND`.
+4. Transición de estado → `409 INVALID_STATUS_TRANSITION`.
+5. Reglas de hora y de ventana → `422`:
+   - `APPOINTMENT_NOT_STARTED` en `complete` y `no-show`;
+   - `CANCELLATION_WINDOW_CLOSED` en `cancel`;
+   - en `reschedule`, primero `RESCHEDULE_WINDOW_CLOSED` y después `SAME_START_TIME`.
+6. Solo en `reschedule`, las comprobaciones de la creación desde su paso 3, menos la del cliente, que ya es el de la cita:
+   - profesional y servicio activos → `404`;
+   - `SERVICE_NOT_OFFERED`, `TOO_SOON`, `TOO_FAR`, `OUTSIDE_WORKING_HOURS` e `INVALID_SLOT_START` → `422`;
+   - `SLOT_NOT_AVAILABLE` y `CLIENT_OVERLAP` → `409`.
+
+Concurrencia:
+
+- `confirm`, `complete`, `cancel` y `no-show` bloquean la fila de la cita (`SELECT ... FOR UPDATE`) y revisan el estado dentro de la transacción. Si llegan dos a la vez, la segunda ve el resultado de la primera: por ejemplo, de dos cancelaciones simultáneas, una da `200` y la otra `409`.
+- `reschedule` sigue estos pasos, sin deadlocks:
+  1. lee la cita sin bloquear, para saber su profesional y su cliente;
+  2. bloquea al profesional y después al cliente, el mismo orden de la creación;
+  3. bloquea la cita, la vuelve a leer y revisa su estado.
+
+  Así compite por el mismo horario con las reservas y con otras reprogramaciones.
+
+Errores:
+
+- `400 VALIDATION_ERROR` · `400 MALFORMED_REQUEST` · `400 INVALID_PARAMETER` (`{id}` que no es un número)
+- `401 AUTHENTICATION_REQUIRED` · `403 ACCESS_DENIED` · `404 RESOURCE_NOT_FOUND`
+- `409 INVALID_STATUS_TRANSITION` · `409 SLOT_NOT_AVAILABLE` · `409 CLIENT_OVERLAP`
+- `422 APPOINTMENT_NOT_STARTED` · `422 CANCELLATION_WINDOW_CLOSED` · `422 RESCHEDULE_WINDOW_CLOSED` · `422 SAME_START_TIME`
+- Los `422` de horario de la creación
+
 Disponibilidad → `GET /api/v1/professionals/2/availability?date=2026-11-05&serviceId=1` (público; el token es opcional) → `200`:
 
 ```json
@@ -1049,7 +1138,7 @@ En errores de validación (`400`), `details` lista los campos: `[{ "field": "ema
 
 `422 SERVICE_NOT_OFFERED` (RN-05): el profesional no ofrece el servicio pedido. Lo devuelven la disponibilidad (Fase 5) y la creación de citas (Fase 6).
 
-Códigos de las citas (Fase 6a; el orden en que se comprueban está en 8.3):
+Códigos de las citas (Fases 6a y 6b; el orden en que se comprueban está en 8.3):
 
 | `code` | HTTP | Cuándo |
 |---|---|---|
@@ -1061,12 +1150,17 @@ Códigos de las citas (Fase 6a; el orden en que se comprueban está en 8.3):
 | `SLOT_NOT_AVAILABLE` | 409 | El profesional ya tiene una cita activa que se solapa (RN-02) |
 | `CLIENT_OVERLAP` | 409 | El cliente ya tiene una cita activa que se solapa, con cualquier profesional (RN-06) |
 | `INVALID_DATE_RANGE` | 400 | En `GET /appointments`, `from` es posterior a `to` |
+| `INVALID_STATUS_TRANSITION` | 409 | El cambio de estado no está en el diagrama de 4.4 (RN-07), o se reprograma una cita que no es `PENDING` ni `CONFIRMED` |
+| `APPOINTMENT_NOT_STARTED` | 422 | `complete` o `no-show` antes de la hora de inicio |
+| `CANCELLATION_WINDOW_CLOSED` | 422 | Un CLIENT cancela a menos de `cancel-limit-hours` horas del inicio (RN-08) |
+| `RESCHEDULE_WINDOW_CLOSED` | 422 | Un CLIENT reprograma a menos de `cancel-limit-hours` horas del inicio actual |
+| `SAME_START_TIME` | 422 | `reschedule` con el mismo `startTime` que ya tiene la cita |
 
 | Excepción | HTTP | `code` de ejemplo |
 |---|---|---|
 | `ResourceNotFoundException` | 404 | `RESOURCE_NOT_FOUND` |
 | `ConflictException` | 409 | `SLOT_NOT_AVAILABLE`, `CLIENT_OVERLAP`, `EMAIL_ALREADY_USED`, `SERVICE_NAME_ALREADY_EXISTS`, `INVALID_STATUS_TRANSITION` |
-| `BusinessRuleException` | 422 | `OUTSIDE_WORKING_HOURS`, `TOO_SOON`, `TOO_FAR`, `INVALID_SLOT_START`, `INVALID_CLIENT_ID`, `SERVICE_NOT_OFFERED`, `CANCELLATION_WINDOW_PASSED`, `INVALID_CURRENT_PASSWORD`, `PASSWORD_UNCHANGED`, `CANNOT_DEACTIVATE_SELF`, `INVALID_SERVICE_IDS`, `WORKING_HOURS_OVERLAP` |
+| `BusinessRuleException` | 422 | `OUTSIDE_WORKING_HOURS`, `TOO_SOON`, `TOO_FAR`, `INVALID_SLOT_START`, `INVALID_CLIENT_ID`, `SERVICE_NOT_OFFERED`, `APPOINTMENT_NOT_STARTED`, `CANCELLATION_WINDOW_CLOSED`, `RESCHEDULE_WINDOW_CLOSED`, `SAME_START_TIME`, `INVALID_CURRENT_PASSWORD`, `PASSWORD_UNCHANGED`, `CANNOT_DEACTIVATE_SELF`, `INVALID_SERVICE_IDS`, `WORKING_HOURS_OVERLAP` |
 | `ForbiddenOperationException` | 403 | `FORBIDDEN_OPERATION` |
 | `BadRequestException` (p. ej. `sort` por un campo no permitido) | 400 | `INVALID_SORT`, `INVALID_DATE_RANGE` |
 | `MethodArgumentNotValidException` | 400 | `VALIDATION_ERROR` |
