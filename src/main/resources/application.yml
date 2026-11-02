@@ -23,6 +23,10 @@ spring:
     deserialization:
       accept-float-as-int: false   # 30.5 o 30.0 donde va un entero -> 400 MALFORMED_REQUEST (no se trunca)
 
+springdoc:
+  default-produces-media-type: application/json   # sin esto, Swagger muestra las respuestas como */*
+  default-consumes-media-type: application/json
+
 management:
   endpoints:
     web:
