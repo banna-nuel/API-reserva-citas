@@ -2027,7 +2027,7 @@ docker compose --profile app up -d --build
 - Toma las variables de `.env` y les cambia `DB_HOST=mysql` y `DB_PORT=3306`, que son el servicio y el puerto dentro de la red de compose.
 - Publica la API en `127.0.0.1:${APP_PORT}` (8080 por defecto).
 - Corre con el perfil `prod` por defecto; `SPRING_PROFILES_ACTIVE` lo cambia.
-- Si `--build` falla con `failed to execute bake` (pasa con algunas versiones de Compose que construyen con *bake*), construye la imagen aparte con `docker build -t citas-api:local .` y luego corre `docker compose --profile app up -d`.
+- Si `--build` falla con `failed to execute bake` o `additional privileges requested`, revisa la capitalización de la carpeta de la terminal. Compose construye con *bake* aunque se defina `COMPOSE_BAKE=false`, y *bake* rechaza la ruta si la terminal la usa con otra capitalización que la del disco (por ejemplo, `c:\code\citas-api` cuando la carpeta es `C:\Code\citas-api`). Abre la terminal en la ruta exacta. Si no, construye la imagen aparte con `docker build -t citas-api:local .` y luego corre `docker compose --profile app up -d`.
 
 ### CI con GitHub Actions
 
