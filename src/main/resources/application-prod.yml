@@ -1,0 +1,12 @@
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
+logging:
+  level:
+    root: INFO
+    # Un choque de clave única (email o nombre repetidos en una carrera) se responde con 409, pero Hibernate
+    # lo anota antes como WARN con el valor duplicado (p. ej. el email). Los errores reales siguen saliendo
+    # por el handler del 500 con su stacktrace
+    org.hibernate.orm.jdbc.error: OFF

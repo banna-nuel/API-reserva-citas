@@ -1,0 +1,42 @@
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: citas-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${DB_NAME}
+      MYSQL_USER: ${DB_USER}
+      MYSQL_PASSWORD: ${DB_PASS}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASS}
+      TZ: America/Bogota
+    ports:
+      - "127.0.0.1:${DB_PORT}:3306"   # solo accesible desde esta maquina
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # Opcional: la API en un contenedor. Solo se levanta con  docker compose --profile app up -d --build ;
+  # un  docker compose up -d  normal sigue levantando solo MySQL
+  app:
+    profiles: ["app"]
+    build: .
+    image: citas-api:local
+    container_name: citas-api
+    depends_on:
+      mysql:
+        condition: service_healthy
+    env_file: .env                   # DB_NAME, DB_USER, DB_PASS, JWT_SECRET, ADMIN_EMAIL, ADMIN_PASSWORD...
+    environment:
+      DB_HOST: mysql                 # el servicio de MySQL dentro de la red de compose
+      DB_PORT: "3306"                # el puerto interno, no el publicado en el host
+      APP_PORT: "8080"               # dentro del contenedor siempre 8080; hacia fuera, APP_PORT de .env
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-prod}   # prod: sin Swagger
+    ports:
+      - "127.0.0.1:${APP_PORT:-8080}:8080"
+
+volumes:
+  mysql_data:

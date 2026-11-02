@@ -1,0 +1,7 @@
+# Lista blanca: al contexto de la imagen solo entra lo que necesita la compilación. Así quedan fuera, entre otros,
+# .env (secretos), .git, target, .claude, postman, docs, .github y los archivos del IDE
+*
+!mvnw
+!.mvn/
+!pom.xml
+!src/

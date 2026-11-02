@@ -1,0 +1,8 @@
+target/
+.env
+.idea/
+*.iml
+.vscode/
+*.log
+.claude/
+.playwright-mcp/

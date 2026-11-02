@@ -1,1480 +1,183 @@
-# Citas API — API REST para reserva de citas
+# Citas API
 
-Guía completa para diseñar, desarrollar, probar y desplegar una API de **reserva de citas** con **Java, Spring Boot, MySQL y Postman**.
-Está escrita en el orden en que se desarrolla el proyecto: sigue las secciones de arriba hacia abajo y marca las casillas `- [ ]` conforme avances.
+API REST para reservar citas con profesionales: catálogo de servicios, horarios laborales, disponibilidad, reservas
+sin doble reserva (también con peticiones simultáneas) y cambios de estado de cada cita. Autenticación con JWT y tres
+roles: `ADMIN`, `PROFESSIONAL` y `CLIENT`.
 
-## Tabla de contenido
+La guía de diseño completa (reglas de negocio, contrato de la API, plan por fases y decisiones) está en
+[docs/GUIA.md](docs/GUIA.md).
 
-1. [Descripción general](#1-descripción-general)
-2. [Stack tecnológico](#2-stack-tecnológico)
-3. [Requisitos previos](#3-requisitos-previos)
-4. [Requisitos y reglas de negocio](#4-requisitos-y-reglas-de-negocio)
-5. [Modelo de datos](#5-modelo-de-datos)
-6. [Arquitectura y estructura del proyecto](#6-arquitectura-y-estructura-del-proyecto)
-7. [Configuración inicial](#7-configuración-inicial)
-8. [Diseño de la API (contrato)](#8-diseño-de-la-api-contrato)
-9. [Plan de desarrollo paso a paso](#9-plan-de-desarrollo-paso-a-paso)
-10. [Guía de implementación (código de referencia)](#10-guía-de-implementación-código-de-referencia)
-11. [Seguridad con JWT](#11-seguridad-con-jwt)
-12. [Pruebas](#12-pruebas)
-13. [Documentación con Swagger/OpenAPI](#13-documentación-con-swaggeropenapi)
-14. [Despliegue y CI](#14-despliegue-y-ci)
-15. [Buenas prácticas](#15-buenas-prácticas)
-16. [Checklist final](#16-checklist-final)
-17. [Problemas comunes](#17-problemas-comunes)
-18. [Mejoras futuras](#18-mejoras-futuras)
-19. [Referencias](#19-referencias)
+## Stack
 
----
+Java 21 · Spring Boot 4 (Web MVC, Security, Data JPA, Validation) · MySQL 8.4 · Flyway · JJWT · springdoc-openapi ·
+JUnit 5, Mockito, Testcontainers y JaCoCo · Docker Compose · GitHub Actions.
 
-## 1. Descripción general
+## Requisitos
 
-API REST para gestionar reservas de citas en un negocio de servicios (consultorio, barbería, spa, canchas deportivas…).
-Los **clientes** consultan servicios, profesionales y horarios libres, y reservan. Los **profesionales** administran su agenda. El **administrador** configura el catálogo.
+- **JDK 21** (`java -version`). Maven no hace falta: el proyecto trae `mvnw`.
+- **Docker** con Docker Compose (Docker Desktop en Windows y macOS), para MySQL y para las pruebas de integración.
+- Git.
 
-| Rol | Qué puede hacer |
-|---|---|
-| `CLIENT` | Registrarse, ver catálogo y disponibilidad, reservar, cancelar y reprogramar sus citas |
-| `PROFESSIONAL` | Ver su agenda, confirmar/completar citas, gestionar su horario laboral |
-| `ADMIN` | Gestionar usuarios, servicios, profesionales y todas las citas |
+## Cómo correrla
 
-**Alcance del MVP:** autenticación JWT, catálogo de servicios y profesionales, horarios laborales, cálculo de disponibilidad y ciclo de vida completo de la cita. Lo que queda fuera está en la [sección 18](#18-mejoras-futuras).
+Los comandos van en PowerShell (Windows) y en bash (Linux y macOS).
 
-**Decisión de zona horaria:** las fechas de las citas se guardan como `LocalDateTime` y se interpretan en la zona horaria del negocio (`America/Bogota`, configurable). Si algún día atiendes en varios países, migra a `Instant`/UTC.
-
----
-
-## 2. Stack tecnológico
-
-| Componente | Versión recomendada | Notas |
-|---|---|---|
-| Java (JDK) | 21 LTS o 25 LTS | Mínimo 17 |
-| Spring Boot | 4.1.x | Trae Spring Framework 7 y Spring Security 7 |
-| MySQL | 8.4 LTS | Driver `com.mysql:mysql-connector-j` |
-| Flyway | La que gestiona Spring Boot | Migraciones versionadas |
-| springdoc-openapi | 3.1.x | Para Boot 4.1 (la línea 3.0.x es para Boot 4.0) |
-| JJWT | 0.13.0 | Con `jjwt-gson` |
-| Build | Maven (wrapper `mvnw`) | |
-| Pruebas | JUnit 5, Mockito, Testcontainers | |
-| Pruebas manuales | Postman | |
-| Contenedores | Docker + Docker Compose | |
-
-### Si sigues tutoriales de Spring Boot 3, cambia esto
-
-| Tutorial (Boot 3) | Spring Boot 4 |
-|---|---|
-| `spring-boot-starter-web` | `spring-boot-starter-webmvc` |
-| `flyway-core` | `spring-boot-starter-flyway` + `flyway-mysql` |
-| `jjwt-jackson` | `jjwt-gson` (Boot 4 usa Jackson 3 y `jjwt-jackson` depende de Jackson 2) |
-| springdoc 2.x | springdoc 3.x |
-| `@MockBean` | `@MockitoBean` |
-| `@WebMvcTest` en `org.springframework.boot.test.autoconfigure.web.servlet` | `org.springframework.boot.webmvc.test.autoconfigure` |
-
----
-
-## 3. Requisitos previos
-
-| Herramienta | Cómo verificar |
-|---|---|
-| JDK 21 o superior | `java -version` |
-| Git | `git --version` |
-| Docker Desktop | `docker --version` y `docker compose version` |
-| Maven | Opcional: el proyecto incluye `mvnw` |
-| IDE | IntelliJ IDEA, o VS Code con *Extension Pack for Java* y *Spring Boot Extension Pack* |
-| Postman | La cuenta gratuita basta |
-| Cliente SQL | DBeaver o MySQL Workbench |
-
----
-
-## 4. Requisitos y reglas de negocio
-
-### 4.1 Requisitos funcionales
-
-- **Cliente:** RF-01 registrarse e iniciar sesión · RF-02 ver servicios y profesionales · RF-03 consultar horarios disponibles · RF-04 reservar una cita · RF-05 ver, cancelar y reprogramar sus citas.
-- **Profesional:** RF-06 ver su agenda (por día, rango o estado) · RF-07 confirmar, completar o marcar inasistencia · RF-08 gestionar su horario laboral.
-- **Administrador:** RF-09 CRUD de servicios · RF-10 alta de profesionales y asignación de servicios · RF-11 activar/desactivar usuarios · RF-12 ver y gestionar todas las citas.
-
-### 4.2 Requisitos no funcionales
-
-- **Seguridad:** JWT sin estado, contraseñas con BCrypt, autorización por rol, secretos fuera del código.
-- **Consistencia:** nunca debe haber doble reserva, ni siquiera con peticiones simultáneas.
-- **Calidad:** validación de entrada, errores con formato uniforme, paginación en listados.
-- **Mantenibilidad:** arquitectura en capas, DTOs, migraciones versionadas, cobertura ≥ 70 % en servicios.
-- **Documentación:** OpenAPI/Swagger y colección Postman versionada.
-- **Portabilidad:** la base de datos se levanta con un solo comando (`docker compose up -d`).
-
-### 4.3 Reglas de negocio
-
-| ID | Regla |
-|---|---|
-| RN-01 | La duración de la cita la define el servicio: `fin = inicio + duración`. |
-| RN-02 | Un profesional no puede tener dos citas activas (`PENDING`/`CONFIRMED`) solapadas. Hay solape si `nuevoInicio < existenteFin` **y** `nuevoFin > existenteInicio`. |
-| RN-03 | La cita debe caber completa dentro de un bloque del horario laboral del profesional para ese día de la semana. |
-| RN-04 | Se reserva con una anticipación mínima (`min-notice-minutes`) y como máximo `max-days-ahead` días hacia adelante. |
-| RN-05 | Servicio y profesional deben estar activos, y el profesional debe ofrecer ese servicio. |
-| RN-06 | Un cliente no puede tener dos citas activas solapadas, ni siquiera con profesionales distintos. |
-| RN-07 | Solo existen las transiciones del diagrama 4.4. `CANCELLED`, `COMPLETED` y `NO_SHOW` son estados finales. |
-| RN-08 | El cliente cancela hasta `cancel-limit-hours` antes de la cita; profesional y admin, sin límite. |
-| RN-09 | El precio se congela al reservar: si el servicio cambia de precio después, la cita no cambia. |
-| RN-10 | Borrado lógico: usuarios, profesionales y servicios se desactivan (`active = false`), no se eliminan. |
-| RN-11 | Email único (se guarda en minúsculas). Contraseña de 8 a 72 caracteres (BCrypt solo usa los primeros 72 bytes). |
-| RN-12 | Reprogramar = volver a validar RN-02 a RN-06 excluyendo la propia cita. |
-| RN-13 | Cada usuario opera solo sobre lo suyo: el cliente sobre sus citas, el profesional sobre las de su agenda. Si no le pertenece, responder 404 (no revelar que existe). |
-
-### 4.4 Ciclo de vida de la cita
-
-```mermaid
-stateDiagram-v2
-    [*] --> PENDING
-    PENDING --> CONFIRMED : confirmar
-    PENDING --> CANCELLED : cancelar
-    CONFIRMED --> COMPLETED : completar
-    CONFIRMED --> CANCELLED : cancelar
-    CONFIRMED --> NO_SHOW : no asistió
-    COMPLETED --> [*]
-    CANCELLED --> [*]
-    NO_SHOW --> [*]
-```
-
----
-
-## 5. Modelo de datos
-
-```mermaid
-erDiagram
-    USERS ||--o| PROFESSIONALS : "tiene perfil"
-    USERS ||--o{ APPOINTMENTS : "reserva como cliente"
-    PROFESSIONALS ||--o{ WORKING_HOURS : "define"
-    PROFESSIONALS ||--o{ APPOINTMENTS : "atiende"
-    PROFESSIONALS }o--o{ SERVICE_OFFERINGS : "ofrece"
-    SERVICE_OFFERINGS ||--o{ APPOINTMENTS : "se reserva en"
-```
-
-Guarda este script como `src/main/resources/db/migration/V1__create_schema.sql`.
-**Regla de oro de Flyway:** una migración ya aplicada no se edita nunca. Cualquier cambio posterior va en una migración nueva (`V2__...`, `V3__...`).
-
-```sql
-CREATE TABLE users (
-    id            BIGINT       NOT NULL AUTO_INCREMENT,
-    full_name     VARCHAR(120) NOT NULL,
-    email         VARCHAR(150) NOT NULL,
-    password_hash VARCHAR(100) NOT NULL,                 -- hash BCrypt
-    phone         VARCHAR(30),
-    role          VARCHAR(20)  NOT NULL,                 -- ADMIN | PROFESSIONAL | CLIENT
-    active        BOOLEAN      NOT NULL DEFAULT TRUE,
-    created_at    DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-    updated_at    DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
-    PRIMARY KEY (id),
-    CONSTRAINT uq_users_email UNIQUE (email)
-);
-
-CREATE TABLE professionals (
-    id         BIGINT       NOT NULL AUTO_INCREMENT,
-    user_id    BIGINT       NOT NULL,
-    specialty  VARCHAR(100) NOT NULL,
-    bio        VARCHAR(500),
-    active     BOOLEAN      NOT NULL DEFAULT TRUE,
-    created_at DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-    updated_at DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
-    PRIMARY KEY (id),
-    CONSTRAINT uq_professionals_user UNIQUE (user_id),
-    CONSTRAINT fk_professionals_user FOREIGN KEY (user_id) REFERENCES users (id)
-);
-
-CREATE TABLE service_offerings (
-    id               BIGINT        NOT NULL AUTO_INCREMENT,
-    name             VARCHAR(100)  NOT NULL,
-    description      VARCHAR(500),
-    duration_minutes INT           NOT NULL,
-    price            DECIMAL(10,2) NOT NULL,
-    active           BOOLEAN       NOT NULL DEFAULT TRUE,
-    created_at       DATETIME(6)   NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-    updated_at       DATETIME(6)   NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
-    PRIMARY KEY (id),
-    CONSTRAINT uq_service_offerings_name UNIQUE (name),
-    CONSTRAINT ck_service_duration CHECK (duration_minutes > 0),
-    CONSTRAINT ck_service_price CHECK (price >= 0)
-);
-
-CREATE TABLE professional_services (                     -- relación N:M
-    professional_id BIGINT NOT NULL,
-    service_id      BIGINT NOT NULL,
-    PRIMARY KEY (professional_id, service_id),
-    CONSTRAINT fk_ps_professional FOREIGN KEY (professional_id) REFERENCES professionals (id),
-    CONSTRAINT fk_ps_service      FOREIGN KEY (service_id)      REFERENCES service_offerings (id)
-);
-
-CREATE TABLE working_hours (                             -- varios bloques por día (p. ej. pausa de almuerzo)
-    id              BIGINT      NOT NULL AUTO_INCREMENT,
-    professional_id BIGINT      NOT NULL,
-    day_of_week     VARCHAR(10) NOT NULL,                -- MONDAY … SUNDAY (java.time.DayOfWeek)
-    start_time      TIME        NOT NULL,
-    end_time        TIME        NOT NULL,
-    PRIMARY KEY (id),
-    CONSTRAINT ck_wh_range CHECK (end_time > start_time),
-    CONSTRAINT fk_wh_professional FOREIGN KEY (professional_id) REFERENCES professionals (id),
-    INDEX idx_wh_professional_day (professional_id, day_of_week)
-);
-
-CREATE TABLE appointments (
-    id              BIGINT        NOT NULL AUTO_INCREMENT,
-    client_id       BIGINT        NOT NULL,
-    professional_id BIGINT        NOT NULL,
-    service_id      BIGINT        NOT NULL,
-    start_time      DATETIME      NOT NULL,
-    end_time        DATETIME      NOT NULL,
-    status          VARCHAR(20)   NOT NULL DEFAULT 'PENDING',
-    price           DECIMAL(10,2) NOT NULL,              -- precio congelado al reservar (RN-09)
-    notes           VARCHAR(500),
-    cancel_reason   VARCHAR(255),
-    created_at      DATETIME(6)   NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-    updated_at      DATETIME(6)   NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
-    PRIMARY KEY (id),
-    CONSTRAINT ck_appt_range CHECK (end_time > start_time),
-    CONSTRAINT fk_appt_client       FOREIGN KEY (client_id)       REFERENCES users (id),
-    CONSTRAINT fk_appt_professional FOREIGN KEY (professional_id) REFERENCES professionals (id),
-    CONSTRAINT fk_appt_service      FOREIGN KEY (service_id)      REFERENCES service_offerings (id),
-    INDEX idx_appt_professional_time (professional_id, start_time, end_time),
-    INDEX idx_appt_client_time (client_id, start_time),
-    INDEX idx_appt_status (status)
-);
-```
-
----
-
-## 6. Arquitectura y estructura del proyecto
-
-### Flujo de una petición
-
-```
-Cliente (Postman / front)
-   │  HTTP + JSON
-   ▼
-Filtro JWT ──► SecurityConfig  (¿autenticado? ¿rol permitido?)
-   ▼
-Controller    valida el DTO (@Valid), llama al servicio, devuelve el código HTTP
-   ▼
-Service       reglas de negocio, @Transactional, convierte entidad → DTO
-   ▼
-Repository    Spring Data JPA
-   ▼
-MySQL         esquema versionado con Flyway
-
-(cualquier excepción) ──► GlobalExceptionHandler ──► JSON de error uniforme
-```
-
-### Reglas de dependencia
-
-- `controller → service → repository`. El controlador nunca llama a un repositorio y el servicio no conoce HTTP (`HttpServletRequest`, `ResponseEntity`).
-- **Las entidades JPA no salen del servicio**: se convierten a DTO dentro de la transacción. Con `open-in-view: false` esto evita `LazyInitializationException`.
-- Las reglas de negocio viven en `service` (o en métodos de la entidad/enum, como `AppointmentStatus.canTransitionTo`).
-- La organización es **por capas** (simple para empezar). Si el proyecto crece, puedes pasar a organización por módulo (`appointment/`, `professional/`…).
-- La entidad de servicios se llama `ServiceOffering` (y no `Service`) para no confundirla con la anotación `@Service` de Spring. En la URL sigue siendo `/services`.
-
-### Estructura de carpetas
-
-```
-citas-api/
-├── .github/workflows/ci.yml
-├── .env.example                  # plantilla de variables (el .env real NO se sube)
-├── .gitignore
-├── docker-compose.yml            # MySQL para desarrollo
-├── Dockerfile
-├── pom.xml
-├── README.md
-├── postman/
-│   ├── citas-api.postman_collection.json
-│   └── local.postman_environment.json
-└── src
-    ├── main
-    │   ├── java/com/tuempresa/citas
-    │   │   ├── CitasApiApplication.java
-    │   │   ├── config/        AppProperties, AppConfig (Clock), OpenApiConfig, SecurityConfig, AdminBootstrap
-    │   │   ├── security/      AuthUser, CustomUserDetailsService, JwtService, JwtAuthenticationFilter,
-    │   │   │                  RestAuthenticationEntryPoint, RestAccessDeniedHandler
-    │   │   ├── controller/    AuthController, UserController, ServiceOfferingController,
-    │   │   │                  ProfessionalController, AppointmentController
-    │   │   ├── service/       AuthService, UserService, ServiceOfferingService, ProfessionalService,
-    │   │   │                  WorkingHourService, AvailabilityService, AppointmentService
-    │   │   ├── repository/    UserRepository, ProfessionalRepository, ServiceOfferingRepository,
-    │   │   │                  WorkingHourRepository, AppointmentRepository
-    │   │   ├── entity/        User, Professional, ServiceOffering, WorkingHour, Appointment
-    │   │   │   └── enums/     Role, AppointmentStatus
-    │   │   ├── dto/
-    │   │   │   ├── request/   RegisterRequest, LoginRequest, CreateAppointmentRequest, ...
-    │   │   │   └── response/  AuthResponse, UserResponse, AppointmentResponse, TimeSlot, PageResponse, ...
-    │   │   ├── mapper/        AppointmentMapper, ProfessionalMapper, ...   (manuales o MapStruct)
-    │   │   └── exception/     ApiException, ResourceNotFoundException, ConflictException,
-    │   │                      BusinessRuleException, ForbiddenOperationException, ApiError,
-    │   │                      GlobalExceptionHandler
-    │   └── resources
-    │       ├── application.yml
-    │       ├── application-dev.yml
-    │       ├── application-prod.yml
-    │       └── db/migration/V1__create_schema.sql
-    └── test/java/com/tuempresa/citas
-        ├── service/           pruebas unitarias (Mockito)
-        ├── repository/        @DataJpaTest + Testcontainers
-        ├── controller/        @WebMvcTest
-        └── integration/       @SpringBootTest de extremo a extremo
-```
-
----
-
-## 7. Configuración inicial
-
-### 7.1 Crear el proyecto en Initializr
-
-Entra a <https://start.spring.io> y configura:
-
-| Campo | Valor |
-|---|---|
-| Project | Maven |
-| Language | Java |
-| Spring Boot | 4.1.x (la última estable; evita SNAPSHOT y RC) |
-| Group / Artifact | `com.tuempresa` / `citas-api` |
-| Packaging / Java | Jar / 21 |
-| Dependencies | Spring Web, Spring Data JPA, Validation, Spring Security, MySQL Driver, Flyway Migration, Lombok, Spring Boot Actuator, Testcontainers |
-
-### 7.2 Dependencias
-
-Con Boot 4 los starters son modulares. Verifica que tu `pom.xml` tenga estos (Initializr los agrega; revisa que `flyway-mysql` esté):
-
-| Dependencia | Para qué |
-|---|---|
-| `spring-boot-starter-webmvc` | API REST con Spring MVC |
-| `spring-boot-starter-data-jpa` | JPA/Hibernate y repositorios |
-| `spring-boot-starter-validation` | Validación de DTOs (`@Valid`) |
-| `spring-boot-starter-security` | Autenticación y autorización |
-| `spring-boot-starter-flyway` + `org.flywaydb:flyway-mysql` | Migraciones de base de datos |
-| `com.mysql:mysql-connector-j` (runtime) | Driver de MySQL |
-| `spring-boot-starter-actuator` | `/actuator/health` |
-| `org.projectlombok:lombok` | Menos código repetitivo |
-| Pruebas: `spring-boot-starter-webmvc-test`, `spring-boot-starter-data-jpa-test`, `org.springframework.security:spring-security-test`, Testcontainers (MySQL) | Tests |
-
-**Añade a mano** lo que Initializr no genera (springdoc y JWT):
-
-```xml
-<properties>
-    <java.version>21</java.version>
-    <jjwt.version>0.13.0</jjwt.version>
-    <springdoc.version>3.1.0</springdoc.version>
-</properties>
-
-<dependencies>
-    <dependency>
-        <groupId>org.springdoc</groupId>
-        <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
-        <version>${springdoc.version}</version>
-    </dependency>
-    <dependency>
-        <groupId>io.jsonwebtoken</groupId>
-        <artifactId>jjwt-api</artifactId>
-        <version>${jjwt.version}</version>
-    </dependency>
-    <dependency>
-        <groupId>io.jsonwebtoken</groupId>
-        <artifactId>jjwt-impl</artifactId>
-        <version>${jjwt.version}</version>
-        <scope>runtime</scope>
-    </dependency>
-    <dependency>
-        <groupId>io.jsonwebtoken</groupId>
-        <artifactId>jjwt-gson</artifactId>
-        <version>${jjwt.version}</version>
-        <scope>runtime</scope>
-    </dependency>
-</dependencies>
-```
-
-### 7.3 Variables de entorno
-
-Crea `.env.example` (este sí se sube al repositorio) y cópialo a `.env` (este **no** se sube; agrégalo al `.gitignore`).
-No pongas comentarios al final de una línea de valor: van siempre en su propia línea.
-
-```dotenv
-# Base de datos
-DB_HOST=localhost
-DB_PORT=3306
-DB_NAME=citas_db
-DB_USER=citas_user
-DB_PASS=cambia-esta-clave
-DB_ROOT_PASS=cambia-esta-clave-root
-
-# JWT: genera el secreto con  openssl rand -base64 32  (mínimo 256 bits)
-JWT_SECRET=PEGA_AQUI_EL_SECRETO
-JWT_EXPIRATION_MINUTES=60
-
-# Primer usuario administrador (se crea al arrancar si no existe)
-ADMIN_EMAIL=admin@example.com
-ADMIN_PASSWORD=cambia-esta-clave
-```
-
-`.gitignore` mínimo:
-
-```
-target/
-.env
-.idea/
-*.iml
-.vscode/
-*.log
-```
-
-### 7.4 MySQL con Docker Compose
-
-```yaml
-# docker-compose.yml
-services:
-  mysql:
-    image: mysql:8.4
-    container_name: citas-mysql
-    restart: unless-stopped
-    environment:
-      MYSQL_DATABASE: ${DB_NAME}
-      MYSQL_USER: ${DB_USER}
-      MYSQL_PASSWORD: ${DB_PASS}
-      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASS}
-      TZ: America/Bogota
-    ports:
-      - "3306:3306"
-    volumes:
-      - mysql_data:/var/lib/mysql
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-
-volumes:
-  mysql_data:
-```
-
-### 7.5 `application.yml` y perfiles
-
-Spring Boot **no** lee `.env` por sí solo. La línea `spring.config.import` de abajo lo carga (alternativa: define las variables en tu IDE o expórtalas en la terminal).
-
-```yaml
-# src/main/resources/application.yml
-spring:
-  application:
-    name: citas-api
-  config:
-    import: optional:file:.env[.properties]
-  datasource:
-    url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME:citas_db}
-    username: ${DB_USER}
-    password: ${DB_PASS}
-  jpa:
-    open-in-view: false            # evita consultas "ocultas" en la capa web
-    hibernate:
-      ddl-auto: validate           # el esquema lo manda Flyway, Hibernate solo valida
-  data:
-    web:
-      pageable:
-        default-page-size: 20
-        max-page-size: 100
-
-management:
-  endpoints:
-    web:
-      exposure:
-        include: health,info
-
-app:
-  timezone: America/Bogota
-  jwt:
-    secret: ${JWT_SECRET}
-    expiration-minutes: ${JWT_EXPIRATION_MINUTES:60}
-  booking:
-    slot-step-minutes: 30          # cada cuántos minutos se ofrece un horario
-    min-notice-minutes: 60         # anticipación mínima para reservar (RN-04)
-    max-days-ahead: 60             # hasta cuántos días a futuro se puede reservar (RN-04)
-    cancel-limit-hours: 2          # el cliente cancela hasta N horas antes (RN-08)
-  admin:
-    email: ${ADMIN_EMAIL:}
-    password: ${ADMIN_PASSWORD:}
-```
-
-```yaml
-# application-dev.yml  (SPRING_PROFILES_ACTIVE=dev)
-spring:
-  jpa:
-    show-sql: true
-logging:
-  level:
-    com.tuempresa.citas: DEBUG
-```
-
-```yaml
-# application-prod.yml
-springdoc:
-  api-docs:
-    enabled: false
-  swagger-ui:
-    enabled: false
-logging:
-  level:
-    root: INFO
-```
-
-### 7.6 Primera ejecución
+**1. Clonar**
 
 ```bash
-cp .env.example .env                 # en Windows PowerShell: copy .env.example .env  (y edita los valores)
-docker compose up -d                 # levanta MySQL
-./mvnw spring-boot:run -Dspring-boot.run.profiles=dev     # Windows: .\mvnw.cmd spring-boot:run ...
+git clone <url-del-repositorio> citas-api
+cd citas-api
 ```
 
-- Salud: <http://localhost:8080/actuator/health> → `{"status":"UP"}`
-- Swagger UI: <http://localhost:8080/swagger-ui.html>
-- En MySQL deben existir las tablas de la sección 5 y la tabla `flyway_schema_history`.
+**2. Crear el `.env`** a partir de la plantilla (el `.env` nunca se sube al repositorio):
 
----
+```powershell
+Copy-Item .env.example .env        # PowerShell
+```
 
-## 8. Diseño de la API (contrato)
+```bash
+cp .env.example .env               # bash
+```
 
-Define el contrato **antes** de programar. Esta sección es la fuente de verdad: si cambia un endpoint, se cambia aquí primero.
+Ábrelo con un editor y cambia los valores de ejemplo:
 
-### 8.1 Convenciones
+- `DB_PASS`, `DB_ROOT_PASS` y `ADMIN_PASSWORD`: claves nuevas. `ADMIN_PASSWORD` necesita de 8 a 72 caracteres.
+- `ADMIN_EMAIL`: el email del primer administrador.
+- `JWT_SECRET`: un secreto aleatorio de 32 bytes en Base64. Para generarlo:
 
-- Base URL: `/api/v1`. Formato JSON (UTF-8).
-- Recursos en plural, minúsculas y con guiones: `/working-hours`. Sin verbos en la URL (excepto acciones de estado como `/cancel`).
-- Fechas ISO-8601: fecha-hora `2026-11-05T10:00:00` (hora local del negocio), fecha `2026-11-05`, hora `09:00`.
-- Autenticación: cabecera `Authorization: Bearer <token>`.
-- Paginación y orden: `?page=0&size=20&sort=startTime,desc` (máximo `size=100`).
-- Filtros como parámetros de consulta: `?status=CONFIRMED&from=2026-11-01&to=2026-11-30`.
+```powershell
+$b = New-Object byte[] 32; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); [Convert]::ToBase64String($b)
+```
 
-| Código | Cuándo |
+```bash
+openssl rand -base64 32
+```
+
+El mismo comando sirve para generar las claves de la base. Guarda el `.env` en **UTF-8 sin BOM** (lo normal en VS Code); ver *Problemas comunes*.
+
+**3. Levantar MySQL**
+
+```bash
+docker compose up -d
+```
+
+Crea el contenedor `citas-mysql`, publicado solo en `127.0.0.1:${DB_PORT}`. Espera a que `docker compose ps` lo muestre `healthy`.
+
+**4. Arrancar la API** con el perfil `dev`, que incluye Swagger y el log de SQL. Flyway crea las tablas y, si no existe, el ADMIN de `.env`.
+
+```powershell
+.\mvnw.cmd spring-boot:run "-Dspring-boot.run.profiles=dev"      # PowerShell
+```
+
+```bash
+./mvnw spring-boot:run -Dspring-boot.run.profiles=dev            # bash
+```
+
+**5. Comprobar** (con el puerto de `APP_PORT`, 8080 por defecto):
+
+- Salud: <http://localhost:8080/actuator/health>. Debe responder `{"status":"UP",...}`.
+- Swagger UI: <http://localhost:8080/swagger-ui.html>. Especificación en `/v3/api-docs`.
+  - Para los endpoints con candado: haz `POST /api/v1/auth/login`, copia `accessToken` y pégalo en **Authorize**.
+
+## Variables de `.env`
+
+| Variable | Para qué |
 |---|---|
-| `200 OK` | Consulta o actualización exitosa |
-| `201 Created` | Recurso creado (incluye cabecera `Location`) |
-| `204 No Content` | Éxito sin cuerpo (p. ej. desactivar) |
-| `400 Bad Request` | Validación fallida o JSON mal formado |
-| `401 Unauthorized` | Sin token, token inválido/expirado o credenciales incorrectas |
-| `403 Forbidden` | Autenticado, pero sin permiso por rol |
-| `404 Not Found` | El recurso no existe (o no es tuyo, RN-13) |
-| `409 Conflict` | Choque de estado: horario ocupado, email duplicado, transición inválida |
-| `422 Unprocessable Entity` | Regla de negocio incumplida (fuera de horario, poca anticipación…) |
-| `500 Internal Server Error` | Error inesperado (nunca exponer el stacktrace) |
+| `APP_PORT` | Puerto de la API en tu máquina (8080 por defecto) |
+| `DB_HOST`, `DB_PORT` | Dónde está MySQL (`localhost` y `3306` con el compose del proyecto) |
+| `DB_NAME`, `DB_USER`, `DB_PASS` | Base de datos y usuario de la aplicación; el compose los crea con estos valores |
+| `DB_ROOT_PASS` | Clave del usuario `root` del contenedor de MySQL |
+| `JWT_SECRET` | Secreto de firma de los JWT: Base64 de 32 bytes o más |
+| `JWT_EXPIRATION_MINUTES` | Vigencia de los tokens (60 por defecto) |
+| `ADMIN_EMAIL`, `ADMIN_PASSWORD` | Primer administrador; se crea al arrancar si no existe |
+| `SPRING_PROFILES_ACTIVE` | Opcional, solo para la API en Docker (ver abajo) |
 
-### 8.2 Endpoints
+## Usuarios de prueba
 
-**Auth**
+El repositorio no trae usuarios ni contraseñas reales:
 
-| Método | Ruta | Descripción | Acceso | Éxito |
-|---|---|---|---|---|
-| POST | `/auth/register` | Registro de cliente | Público | 201 |
-| POST | `/auth/login` | Inicia sesión y devuelve el JWT | Público | 200 |
+- **ADMIN**: el de `ADMIN_EMAIL` y `ADMIN_PASSWORD` de tu `.env`, creado al primer arranque. Inicia sesión con `POST /api/v1/auth/login`.
+- **Cliente**: cualquiera con `POST /api/v1/auth/register` (el registro público siempre crea un `CLIENT`).
+- **Profesional**: lo da de alta el ADMIN con `POST /api/v1/professionals`, que crea el usuario y su perfil; después inicia sesión como cualquier usuario.
 
-**Usuarios**
+  Su horario se define con `PUT /api/v1/professionals/{id}/working-hours`.
 
-| Método | Ruta | Descripción | Acceso | Éxito |
-|---|---|---|---|---|
-| GET | `/users/me` | Mi perfil | Autenticado | 200 |
-| PUT | `/users/me` | Actualizar mi perfil | Autenticado | 200 |
-| PATCH | `/users/me/password` | Cambiar mi contraseña | Autenticado | 204 |
-| GET | `/users` | Listar usuarios (paginado, filtro `role`) | ADMIN | 200 |
-| PATCH | `/users/{id}/active` | Activar/desactivar usuario | ADMIN | 200 |
+La colección de Postman hace todo este recorrido sola (ver abajo).
 
-**Servicios**
+## Pruebas y cobertura
 
-| Método | Ruta | Descripción | Acceso | Éxito |
-|---|---|---|---|---|
-| GET | `/services` | Listar (paginado; `?active=true&q=texto`) | Público | 200 |
-| GET | `/services/{id}` | Detalle | Público | 200 |
-| POST | `/services` | Crear | ADMIN | 201 |
-| PUT | `/services/{id}` | Actualizar | ADMIN | 200 |
-| DELETE | `/services/{id}` | Desactivar (borrado lógico) | ADMIN | 204 |
+Con Docker encendido (Testcontainers levanta su propio MySQL; no usa el de `docker compose`):
 
-**Profesionales**
-
-| Método | Ruta | Descripción | Acceso | Éxito |
-|---|---|---|---|---|
-| GET | `/professionals` | Listar (`?serviceId=`) | Público | 200 |
-| GET | `/professionals/{id}` | Detalle | Público | 200 |
-| POST | `/professionals` | Crea el usuario (rol PROFESSIONAL) y su perfil en una transacción | ADMIN | 201 |
-| PUT | `/professionals/{id}` | Actualizar | ADMIN | 200 |
-| PUT | `/professionals/{id}/services` | Asignar servicios (lista de ids) | ADMIN | 200 |
-| GET | `/professionals/{id}/working-hours` | Ver horario laboral | Público | 200 |
-| PUT | `/professionals/{id}/working-hours` | Reemplazar horario laboral | ADMIN o el propio profesional | 200 |
-| GET | `/professionals/{id}/availability?date=&serviceId=` | Horarios libres de un día | Público | 200 |
-
-**Citas**
-
-| Método | Ruta | Descripción | Acceso | Éxito |
-|---|---|---|---|---|
-| POST | `/appointments` | Crear cita | CLIENT, ADMIN | 201 |
-| GET | `/appointments` | Listar según rol (`status`, `from`, `to`, `professionalId`) | Autenticado | 200 |
-| GET | `/appointments/{id}` | Detalle | Dueño, profesional asignado, ADMIN | 200 |
-| PATCH | `/appointments/{id}/confirm` | Confirmar | Profesional asignado, ADMIN | 200 |
-| PATCH | `/appointments/{id}/complete` | Marcar completada | Profesional asignado, ADMIN | 200 |
-| PATCH | `/appointments/{id}/cancel` | Cancelar (`{ "reason": "..." }`) | Dueño, profesional asignado, ADMIN | 200 |
-| PATCH | `/appointments/{id}/reschedule` | Reprogramar (`{ "startTime": "..." }`) | Dueño, ADMIN | 200 |
-| PATCH | `/appointments/{id}/no-show` | Marcar inasistencia | Profesional asignado, ADMIN | 200 |
-
-`GET /appointments` devuelve: al CLIENT, solo sus citas; al PROFESSIONAL, las de su agenda; al ADMIN, todas.
-
-### 8.3 Ejemplos
-
-Login → `200`:
-
-```json
-{ "accessToken": "eyJhbGciOi...", "tokenType": "Bearer", "expiresInSeconds": 3600 }
+```powershell
+.\mvnw.cmd -B verify       # PowerShell
 ```
 
-Crear cita → `POST /api/v1/appointments`:
-
-```json
-{ "professionalId": 2, "serviceId": 1, "startTime": "2026-11-05T10:00:00", "notes": "Primera visita" }
+```bash
+./mvnw -B verify           # bash
 ```
 
-Respuesta `201` (con cabecera `Location: /api/v1/appointments/41`):
+- Corre las pruebas unitarias, las de integración (MockMvc), las de controlador (`@WebMvcTest`) y las de extremo a extremo (servidor real).
+- Falla si la cobertura de líneas del paquete `service` baja del 70 %.
+- El informe de cobertura queda en `target/site/jacoco/index.html`.
+- En GitHub Actions corre el mismo `verify` en cada push a `main` o `develop` y en cada pull request (`.github/workflows/ci.yml`).
 
-```json
-{
-  "id": 41,
-  "client": { "id": 7, "fullName": "Ana Pérez" },
-  "professional": { "id": 2, "fullName": "Carlos Ruiz" },
-  "service": { "id": 1, "name": "Consulta general", "durationMinutes": 30 },
-  "startTime": "2026-11-05T10:00:00",
-  "endTime": "2026-11-05T10:30:00",
-  "status": "PENDING",
-  "price": 80000.00,
-  "notes": "Primera visita"
-}
+## Postman
+
+1. *Import* → arrastra `postman/citas-api.postman_collection.json` y `postman/local.postman_environment.json`.
+2. Elige el environment **Citas API (local)** y completa:
+   - `baseUrl`: `http://localhost:8080/api/v1`, con tu `APP_PORT`;
+   - `adminEmail` y `adminPassword`: los de tu `.env`.
+3. En la colección **Citas API**, *Run* → orden por defecto, 1 iteración → las 33 peticiones deben salir en verde.
+
+La colección se corre completa y en orden: los scripts guardan los tokens y los ids que usan las peticiones siguientes. Detalle en la sección 12.2 de [docs/GUIA.md](docs/GUIA.md).
+
+## API en Docker (opcional)
+
+```bash
+docker compose --profile app up -d --build
 ```
 
-Disponibilidad → `GET /api/v1/professionals/2/availability?date=2026-11-05&serviceId=1`:
-
-```json
-{
-  "professionalId": 2,
-  "serviceId": 1,
-  "date": "2026-11-05",
-  "durationMinutes": 30,
-  "slots": [
-    { "start": "2026-11-05T09:00:00", "end": "2026-11-05T09:30:00" },
-    { "start": "2026-11-05T09:30:00", "end": "2026-11-05T10:00:00" }
-  ]
-}
-```
-
-### 8.4 Formato de error (siempre el mismo)
-
-```json
-{
-  "timestamp": "2026-10-23T17:05:12",
-  "status": 409,
-  "error": "Conflict",
-  "code": "SLOT_NOT_AVAILABLE",
-  "message": "El profesional ya tiene una cita en ese horario",
-  "path": "/api/v1/appointments",
-  "details": []
-}
-```
-
-En errores de validación (`400`), `details` lista los campos: `[{ "field": "email", "message": "debe ser un correo válido" }]`.
-
-| Excepción | HTTP | `code` de ejemplo |
-|---|---|---|
-| `ResourceNotFoundException` | 404 | `RESOURCE_NOT_FOUND` |
-| `ConflictException` | 409 | `SLOT_NOT_AVAILABLE`, `CLIENT_OVERLAP`, `EMAIL_ALREADY_USED`, `INVALID_STATUS_TRANSITION` |
-| `BusinessRuleException` | 422 | `OUTSIDE_WORKING_HOURS`, `TOO_SOON`, `TOO_FAR`, `SERVICE_NOT_OFFERED`, `CANCELLATION_WINDOW_PASSED` |
-| `ForbiddenOperationException` | 403 | `FORBIDDEN_OPERATION` |
-| `MethodArgumentNotValidException` | 400 | `VALIDATION_ERROR` |
-| `AuthenticationException` | 401 | `INVALID_CREDENTIALS` |
-| `AccessDeniedException` | 403 | `ACCESS_DENIED` |
-
-El `code` es estable y legible por máquinas: el front-end decide con él, no con el texto del mensaje.
-
----
-
-## 9. Plan de desarrollo paso a paso
-
-Cada fase termina con algo que puedes **probar en Postman**. No avances a la siguiente fase sin cumplir el "Listo cuando".
-
-### Fase 0 — Preparación
-- [ ] Crear repositorio Git (`main` + `develop`) y `.gitignore`
-- [ ] Instalar las herramientas de la sección 3
-- [ ] Definir el paquete base (`com.tuempresa.citas`) y la zona horaria
-- [ ] Crear en Postman la colección `Citas API` y el environment `local` (`baseUrl = http://localhost:8080/api/v1`)
-
-**Listo cuando:** `java -version`, `docker --version` y `git --version` responden bien.
-
-### Fase 1 — Esqueleto y base de datos
-- [ ] Generar el proyecto con Initializr (7.1) y añadir springdoc + JJWT (7.2)
-- [ ] Crear `.env`, `docker-compose.yml` y levantar MySQL (7.3 y 7.4)
-- [ ] Configurar `application.yml` y perfiles (7.5)
-- [ ] Crear `V1__create_schema.sql` (sección 5)
-- [ ] Arrancar la aplicación
-
-**Listo cuando:** `/actuator/health` devuelve `UP` y las tablas existen en MySQL.
-
-### Fase 2 — Base transversal
-- [ ] `AppProperties` (configuración tipada) y bean `Clock`
-- [ ] `ApiError`, excepciones propias y `GlobalExceptionHandler`
-- [ ] `PageResponse<T>`
-- [ ] `OpenApiConfig` (Swagger UI)
-
-**Listo cuando:** un error provocado a propósito devuelve el JSON de la sección 8.4.
-
-### Fase 3 — Usuarios y seguridad
-- [ ] Entidad `User`, enum `Role`, `UserRepository`
-- [ ] `AuthUser`, `CustomUserDetailsService`, `JwtService`, `JwtAuthenticationFilter`, `SecurityConfig` (sección 11)
-- [ ] `POST /auth/register`, `POST /auth/login`, `GET /users/me`
-- [ ] `AdminBootstrap`: un `ApplicationRunner` que crea el primer ADMIN con `app.admin.*` si no existe
-- [ ] Postman: Register → Login (guarda el token) → Me
-
-**Listo cuando:** sin token → 401, con token → 200, y la contraseña nunca aparece en una respuesta.
-
-### Fase 4 — Catálogo
-- [ ] CRUD de `ServiceOffering` (escritura solo ADMIN; lectura pública, paginada y con filtros)
-- [ ] `Professional`: alta (usuario + perfil) y asignación de servicios
-- [ ] `WorkingHour`: GET/PUT validando que `fin > inicio` y que los bloques de un mismo día no se solapen
-
-**Listo cuando:** un CLIENT recibe 403 en los endpoints de ADMIN y un ADMIN puede armar el catálogo completo.
-
-### Fase 5 — Disponibilidad
-- [ ] `AvailabilityService` con el algoritmo de la sección 10.5
-- [ ] `GET /professionals/{id}/availability`
-- [ ] Pruebas unitarias: día sin horario, bloques con pausa, citas existentes, hoy con hora actual
-
-**Listo cuando:** los horarios devueltos no incluyen horas ocupadas, pasadas ni fuera de jornada.
-
-### Fase 6 — Citas (el núcleo)
-- [ ] `Appointment`, `AppointmentStatus` (con `canTransitionTo`) y `AppointmentRepository`
-- [ ] `POST /appointments` aplicando RN-01 a RN-09 (sección 10.4)
-- [ ] `GET /appointments` filtrado por rol y `GET /appointments/{id}`
-- [ ] `confirm`, `complete`, `cancel` (y opcionales: `reschedule`, `no-show`)
-- [ ] Prueba de concurrencia: dos hilos reservan el mismo horario → solo una cita se crea
-
-**Listo cuando:** el flujo completo de la sección 12.3 pasa en Postman, incluidos los casos negativos.
-
-### Fase 7 — Calidad
-- [ ] Pruebas unitarias de todos los `service` (≥ 70 %)
-- [ ] Pruebas de repositorio con Testcontainers
-- [ ] Pruebas de controlador (`@WebMvcTest`) y 1–2 pruebas de integración de extremo a extremo
-- [ ] Tests automáticos en Postman y ejecución con Collection Runner
-
-**Listo cuando:** `./mvnw verify` termina en verde.
-
-### Fase 8 — Documentación y entrega
-- [ ] Anotaciones OpenAPI (`@Tag`, `@Operation`, `@ApiResponse`)
-- [ ] Exportar la colección y el environment de Postman a `/postman`
-- [ ] `Dockerfile` y workflow de CI (sección 14)
-- [ ] Actualizar este README (cómo correr, variables, usuarios de prueba)
-
-**Listo cuando:** una persona nueva clona el repo y lo levanta siguiendo solo el README.
-
-### Receta para cada endpoint nuevo
-
-1. Define el contrato en la sección 8 (método, ruta, request, response, códigos, rol).
-2. Si cambia la base de datos → nueva migración `V{n}__descripcion.sql`.
-3. Entidad (si aplica) y repositorio.
-4. DTOs `record` con validaciones.
-5. Servicio: reglas de negocio, `@Transactional`, excepciones propias, conversión a DTO.
-6. Controlador delgado: `@Valid`, código HTTP correcto, `@PreAuthorize`.
-7. Regla en `SecurityConfig` solo si el endpoint es público.
-8. Pruebas: unitaria del servicio (caso feliz + cada error) y del controlador.
-9. Request en Postman con tests automáticos (feliz + 400/401/403/404/409).
-10. Anotaciones OpenAPI, commit (`feat: ...`) y pull request.
-
----
-
-## 10. Guía de implementación (código de referencia)
-
-Los fragmentos omiten los `import` para ser breves.
-
-### 10.1 Entidad y enum
-
-```java
-@Entity
-@Table(name = "appointments")
-@Getter @Setter @NoArgsConstructor          // evita @Data en entidades JPA
-public class Appointment {
-
-    @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
-
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "client_id")
-    private User client;
-
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "professional_id")
-    private Professional professional;
-
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "service_id")
-    private ServiceOffering service;
-
-    @Column(name = "start_time", nullable = false) private LocalDateTime startTime;
-    @Column(name = "end_time", nullable = false)   private LocalDateTime endTime;
-
-    @Enumerated(EnumType.STRING)                // nunca ORDINAL
-    @Column(nullable = false, length = 20)
-    private AppointmentStatus status = AppointmentStatus.PENDING;
-
-    @Column(nullable = false, precision = 10, scale = 2) private BigDecimal price;
-    @Column(length = 500) private String notes;
-    @Column(name = "cancel_reason") private String cancelReason;
-
-    @CreationTimestamp @Column(name = "created_at", updatable = false) private LocalDateTime createdAt;
-    @UpdateTimestamp   @Column(name = "updated_at")                    private LocalDateTime updatedAt;
-}
-```
-
-`Professional.services` es un `@ManyToMany` con `@JoinTable(name = "professional_services", ...)`. Un método `offers(ServiceOffering s)` en la entidad encapsula la comprobación.
-
-```java
-public enum AppointmentStatus {
-    PENDING, CONFIRMED, CANCELLED, COMPLETED, NO_SHOW;
-
-    public boolean canTransitionTo(AppointmentStatus next) {
-        return switch (this) {
-            case PENDING   -> next == CONFIRMED || next == CANCELLED;
-            case CONFIRMED -> next == COMPLETED || next == CANCELLED || next == NO_SHOW;
-            default        -> false;            // estados finales (RN-07)
-        };
-    }
-}
-```
-
-### 10.2 Repositorios
-
-```java
-public interface ProfessionalRepository extends JpaRepository<Professional, Long> {
-
-    @Lock(LockModeType.PESSIMISTIC_WRITE)       // SELECT ... FOR UPDATE
-    @Query("select p from Professional p where p.id = :id")
-    Optional<Professional> findByIdForUpdate(@Param("id") Long id);
-}
-
-public interface AppointmentRepository
-        extends JpaRepository<Appointment, Long>, JpaSpecificationExecutor<Appointment> {
-
-    @Query("""
-        select count(a) from Appointment a
-        where a.professional.id = :professionalId
-          and a.status in :statuses
-          and a.startTime < :end and a.endTime > :start
-          and (:excludeId is null or a.id <> :excludeId)
-        """)
-    long countOverlapping(@Param("professionalId") Long professionalId,
-                          @Param("statuses") Collection<AppointmentStatus> statuses,
-                          @Param("start") LocalDateTime start,
-                          @Param("end") LocalDateTime end,
-                          @Param("excludeId") Long excludeId);
-
-    // countOverlappingForClient(...): igual, pero con "a.client.id = :clientId"  (RN-06)
-}
-```
-
-Para los filtros opcionales de `GET /appointments` usa `Specification` (`JpaSpecificationExecutor`) en lugar de escribir una consulta por combinación.
-
-### 10.3 DTOs y paginación
-
-```java
-public record RegisterRequest(
-        @NotBlank @Size(max = 120) String fullName,
-        @NotBlank @Email @Size(max = 150) String email,
-        @NotBlank @Size(min = 8, max = 72) String password,
-        @Size(max = 30) String phone) {}
-
-public record CreateAppointmentRequest(
-        @NotNull Long professionalId,
-        @NotNull Long serviceId,
-        @NotNull LocalDateTime startTime,       // "en el futuro" se valida en el servicio con el Clock del negocio
-        @Size(max = 500) String notes) {}
-
-public record PageResponse<T>(List<T> content, int page, int size, long totalElements, int totalPages) {
-    public static <T> PageResponse<T> from(Page<T> p) {
-        return new PageResponse<>(p.getContent(), p.getNumber(), p.getSize(),
-                                  p.getTotalElements(), p.getTotalPages());
-    }
-}
-```
-
-### 10.4 Servicio: crear una cita (aplica RN-01 a RN-09)
-
-```java
-@Service
-@RequiredArgsConstructor
-public class AppointmentService {
-
-    private static final List<AppointmentStatus> ACTIVE =
-            List.of(AppointmentStatus.PENDING, AppointmentStatus.CONFIRMED);
-
-    private final AppointmentRepository appointments;
-    private final ProfessionalRepository professionals;
-    private final ServiceOfferingRepository services;
-    private final UserRepository users;
-    private final WorkingHourService workingHours;
-    private final AppointmentMapper mapper;
-    private final AppProperties props;
-    private final Clock clock;
-
-    // READ_COMMITTED + bloqueo de fila: si dos clientes reservan a la vez, el segundo
-    // espera a que termine el primero y entonces ya "ve" su cita.
-    @Transactional(isolation = Isolation.READ_COMMITTED)
-    public AppointmentResponse create(CreateAppointmentRequest req, Long clientId) {
-
-        // 1) Bloquear primero al profesional
-        Professional professional = professionals.findByIdForUpdate(req.professionalId())
-                .orElseThrow(() -> new ResourceNotFoundException("Profesional no encontrado"));
-        ServiceOffering service = services.findById(req.serviceId())
-                .orElseThrow(() -> new ResourceNotFoundException("Servicio no encontrado"));
-
-        // 2) Reglas de negocio
-        if (!professional.isActive() || !service.isActive() || !professional.offers(service)) {
-            throw new BusinessRuleException("SERVICE_NOT_OFFERED", "El profesional no ofrece este servicio");
-        }
-        LocalDateTime now = LocalDateTime.now(clock);
-        LocalDateTime start = req.startTime();
-        LocalDateTime end = start.plusMinutes(service.getDurationMinutes());          // RN-01
-
-        if (start.isBefore(now.plusMinutes(props.booking().minNoticeMinutes()))) {
-            throw new BusinessRuleException("TOO_SOON", "La cita requiere más anticipación");
-        }
-        if (start.isAfter(now.plusDays(props.booking().maxDaysAhead()))) {
-            throw new BusinessRuleException("TOO_FAR", "No se permiten reservas tan lejanas");
-        }
-        if (!workingHours.fits(professional.getId(), start, end)) {                   // RN-03
-            throw new BusinessRuleException("OUTSIDE_WORKING_HOURS", "Fuera de la jornada del profesional");
-        }
-        if (appointments.countOverlapping(professional.getId(), ACTIVE, start, end, null) > 0) {   // RN-02
-            throw new ConflictException("SLOT_NOT_AVAILABLE", "El profesional ya tiene una cita en ese horario");
-        }
-        if (appointments.countOverlappingForClient(clientId, ACTIVE, start, end, null) > 0) {      // RN-06
-            throw new ConflictException("CLIENT_OVERLAP", "Ya tienes una cita en ese horario");
-        }
-
-        // 3) Persistir con el precio congelado (RN-09)
-        Appointment a = new Appointment();
-        a.setClient(users.getReferenceById(clientId));
-        a.setProfessional(professional);
-        a.setService(service);
-        a.setStartTime(start);
-        a.setEndTime(end);
-        a.setPrice(service.getPrice());
-        a.setNotes(req.notes());
-        return mapper.toResponse(appointments.save(a));
-    }
-}
-```
-
-Para cancelar, confirmar o completar: carga la cita, comprueba pertenencia (RN-13), comprueba `status.canTransitionTo(nuevo)` (si no, `ConflictException` con `INVALID_STATUS_TRANSITION`) y aplica RN-08 en la cancelación del cliente.
-
-### 10.5 Algoritmo de disponibilidad
+- Construye la imagen con el `Dockerfile` (multi-etapa, usuario sin privilegios, `TZ=America/Bogota`) y levanta MySQL más la API en `127.0.0.1:${APP_PORT}`.
+- El contenedor toma las variables de `.env`. Dentro de la red de compose usa `DB_HOST=mysql` y el puerto interno `3306`.
+- Corre con el perfil **`prod`**, sin Swagger. Para otro perfil, pon `SPRING_PROFILES_ACTIVE=dev` en el `.env` o en la consola antes del comando.
+- `docker compose up -d` sin `--profile app` sigue levantando solo MySQL.
+- Para detener solo la API: `docker compose --profile app stop app`.
+
+## Problemas comunes
+
+| Síntoma | Solución |
+|---|---|
+| `The JAVA_HOME environment variable is not defined correctly` | `JAVA_HOME` debe apuntar a la carpeta del JDK, no a su `bin`. Para la consola actual: `$env:JAVA_HOME='C:\Program Files\Java\jdk-21'` |
+| El puerto 8080 está ocupado por otro programa | Pon `APP_PORT=8081` (u otro libre) en `.env` y usa ese puerto en las URLs y en `baseUrl` de Postman |
+| El puerto 3306 está ocupado (otro MySQL) | Cambia `DB_PORT` en `.env` (p. ej. `3307`) y vuelve a `docker compose up -d` |
+| `Could not find a valid Docker environment` en `verify`, o `docker compose` no conecta | Docker está apagado: abre Docker Desktop y espera a que `docker info` responda |
+| La API no toma la primera variable del `.env` (Docker Compose sí la lee) | El `.env` se guardó con BOM y empieza por una variable; `Set-Content -Encoding utf8` de PowerShell 5.1, por ejemplo, añade el BOM. Guárdalo como UTF-8 sin BOM |
+| `docker compose --profile app up --build` falla con `failed to execute bake` o `additional privileges requested` | Construye la imagen aparte con `docker build -t citas-api:local .` y luego `docker compose --profile app up -d` (sin `--build`) |
+| `The container name "/citas-mysql" is already in use` | Otra copia del proyecto ya creó ese contenedor. Detén y quita esa copia (`docker compose down` en su carpeta), o arranca su contenedor en lugar de crear otro |
+
+## Estructura
 
 ```
-disponibilidad(profesionalId, fecha, servicioId):
-  1. dur  = duración del servicio;  paso = app.booking.slot-step-minutes
-  2. bloques  = horario laboral del profesional para fecha.dayOfWeek     (puede haber varios por día)
-  3. ocupadas = citas activas del profesional entre fecha 00:00 y fecha+1 00:00
-  4. para cada bloque:
-        t = bloque.inicio
-        mientras t + dur <= bloque.fin:
-            slot = [fecha+t, fecha+t+dur]
-            si slot.inicio >= ahora + min-notice  Y  no solapa con ninguna de `ocupadas`:
-                agregar slot
-            t = t + paso
-  5. devolver los slots ordenados
+├── src/main/java/com/q/q/
+│   ├── config/        Seguridad, OpenAPI, propiedades tipadas y Clock del negocio
+│   ├── controller/    Endpoints REST (delgados)
+│   ├── dto/           Request y response (records con validación)
+│   ├── entity/        Entidades JPA y enums
+│   ├── exception/     ApiError y manejo global de errores
+│   ├── mapper/        Entidad → DTO
+│   ├── repository/    Spring Data JPA (bloqueos FOR UPDATE, Specifications)
+│   ├── security/      JWT, filtro y usuario autenticado
+│   ├── service/       Reglas de negocio
+│   └── validation/    Validadores propios
+├── src/main/resources/  application*.yml y db/migration (Flyway)
+├── src/test/            Unitarias, integración, @WebMvcTest y extremo a extremo
+├── postman/             Colección y environment importables
+├── docs/GUIA.md         Guía de diseño completa
+├── Dockerfile · docker-compose.yml · .env.example
+└── .github/workflows/ci.yml
 ```
 
-Los `LocalDate` recibidos como parámetro necesitan `@RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date`; sin la anotación, Spring espera un formato dependiente del idioma.
+## Más documentación
 
-### 10.6 Controlador
-
-```java
-@RestController
-@RequestMapping("/api/v1/appointments")
-@RequiredArgsConstructor
-@Tag(name = "Appointments")
-@SecurityRequirement(name = "bearerAuth")
-public class AppointmentController {
-
-    private final AppointmentService appointmentService;
-
-    @PostMapping
-    @PreAuthorize("hasAnyRole('CLIENT','ADMIN')")
-    public ResponseEntity<AppointmentResponse> create(@Valid @RequestBody CreateAppointmentRequest request,
-                                                      @AuthenticationPrincipal AuthUser principal) {
-        AppointmentResponse created = appointmentService.create(request, principal.id());
-        URI location = ServletUriComponentsBuilder.fromCurrentRequest()
-                .path("/{id}").buildAndExpand(created.id()).toUri();
-        return ResponseEntity.created(location).body(created);               // 201 + Location
-    }
-
-    @GetMapping
-    public PageResponse<AppointmentResponse> list(
-            @RequestParam(required = false) AppointmentStatus status,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
-            Pageable pageable,
-            @AuthenticationPrincipal AuthUser principal) {
-        return appointmentService.list(status, from, to, pageable, principal);
-    }
-
-    @PatchMapping("/{id}/cancel")
-    public AppointmentResponse cancel(@PathVariable Long id,
-                                      @Valid @RequestBody CancelAppointmentRequest request,
-                                      @AuthenticationPrincipal AuthUser principal) {
-        return appointmentService.cancel(id, request.reason(), principal);
-    }
-}
-```
-
-### 10.7 Manejo global de errores
-
-```java
-public record ApiError(LocalDateTime timestamp, int status, String error, String code,
-                       String message, String path, List<FieldIssue> details) {
-    public record FieldIssue(String field, String message) {}
-}
-
-@Getter
-public abstract class ApiException extends RuntimeException {
-    private final HttpStatus status;
-    private final String code;
-
-    protected ApiException(HttpStatus status, String code, String message) {
-        super(message);
-        this.status = status;
-        this.code = code;
-    }
-}
-
-public class ConflictException extends ApiException {                // 409
-    public ConflictException(String code, String message) { super(HttpStatus.CONFLICT, code, message); }
-}
-// ResourceNotFoundException (404), BusinessRuleException (422) y ForbiddenOperationException (403)
-// siguen el mismo patrón.
-```
-
-```java
-@Slf4j
-@RestControllerAdvice
-public class GlobalExceptionHandler {
-
-    @ExceptionHandler(ApiException.class)
-    public ResponseEntity<ApiError> handleApi(ApiException ex, HttpServletRequest req) {
-        return build(ex.getStatus(), ex.getCode(), ex.getMessage(), req, List.of());
-    }
-
-    @ExceptionHandler(MethodArgumentNotValidException.class)
-    public ResponseEntity<ApiError> handleValidation(MethodArgumentNotValidException ex, HttpServletRequest req) {
-        List<ApiError.FieldIssue> details = ex.getBindingResult().getFieldErrors().stream()
-                .map(e -> new ApiError.FieldIssue(e.getField(), e.getDefaultMessage()))
-                .toList();
-        return build(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", "Hay campos inválidos", req, details);
-    }
-
-    @ExceptionHandler(AuthenticationException.class)
-    public ResponseEntity<ApiError> handleAuth(HttpServletRequest req) {
-        return build(HttpStatus.UNAUTHORIZED, "INVALID_CREDENTIALS", "Credenciales inválidas", req, List.of());
-    }
-
-    // Imprescindible: @PreAuthorize lanza esta excepción DENTRO del controlador y,
-    // sin este handler, el genérico de abajo la convertiría en un 500.
-    @ExceptionHandler(AccessDeniedException.class)
-    public ResponseEntity<ApiError> handleDenied(HttpServletRequest req) {
-        return build(HttpStatus.FORBIDDEN, "ACCESS_DENIED", "No tienes permisos para esta acción", req, List.of());
-    }
-
-    // Añade también: HttpMessageNotReadableException (400), MethodArgumentTypeMismatchException (400),
-    // HttpRequestMethodNotSupportedException (405) y NoResourceFoundException (404);
-    // si no, el handler genérico los convertiría en 500.
-
-    @ExceptionHandler(Exception.class)
-    public ResponseEntity<ApiError> handleUnexpected(Exception ex, HttpServletRequest req) {
-        log.error("Error no controlado en {}", req.getRequestURI(), ex);
-        return build(HttpStatus.INTERNAL_SERVER_ERROR, "INTERNAL_ERROR", "Error interno del servidor", req, List.of());
-    }
-
-    private ResponseEntity<ApiError> build(HttpStatus status, String code, String message,
-                                           HttpServletRequest req, List<ApiError.FieldIssue> details) {
-        ApiError body = new ApiError(LocalDateTime.now(), status.value(), status.getReasonPhrase(),
-                code, message, req.getRequestURI(), details);
-        return ResponseEntity.status(status).body(body);
-    }
-}
-```
-
-### 10.8 Configuración tipada y reloj del negocio
-
-```java
-@ConfigurationProperties(prefix = "app")
-public record AppProperties(String timezone, Jwt jwt, Booking booking, Admin admin) {
-    public record Jwt(String secret, long expirationMinutes) {}
-    public record Booking(int slotStepMinutes, int minNoticeMinutes, int cancelLimitHours, int maxDaysAhead) {}
-    public record Admin(String email, String password) {}
-}
-// En la clase principal: @ConfigurationPropertiesScan
-
-@Configuration
-public class AppConfig {
-    @Bean
-    Clock clock(AppProperties props) {                  // inyéctalo en vez de usar LocalDateTime.now():
-        return Clock.system(ZoneId.of(props.timezone())); // así el tiempo es controlable en los tests
-    }
-}
-```
-
----
-
-## 11. Seguridad con JWT
-
-### 11.1 Flujo
-
-```
-1. POST /auth/login  (email + password)
-2. AuthenticationManager valida contra la BD (BCrypt)
-3. JwtService genera un token firmado (subject = email, claim roles, expiración)
-4. El cliente envía  Authorization: Bearer <token>  en cada petición
-5. JwtAuthenticationFilter valida el token y deja al usuario en el SecurityContext
-6. SecurityConfig / @PreAuthorize comprueban el rol
-```
-
-### 11.2 `SecurityConfig`
-
-```java
-@Configuration
-@EnableMethodSecurity                                    // habilita @PreAuthorize
-@RequiredArgsConstructor
-public class SecurityConfig {
-
-    private final JwtAuthenticationFilter jwtFilter;
-    private final RestAuthenticationEntryPoint entryPoint;     // responde 401 con el JSON de error
-    private final RestAccessDeniedHandler deniedHandler;       // responde 403 con el JSON de error
-
-    @Bean
-    SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
-        http
-            .csrf(csrf -> csrf.disable())                                           // API sin sesión
-            .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-            .exceptionHandling(e -> e.authenticationEntryPoint(entryPoint).accessDeniedHandler(deniedHandler))
-            .authorizeHttpRequests(auth -> auth
-                .requestMatchers("/api/v1/auth/**", "/actuator/health/**").permitAll()
-                .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
-                .requestMatchers(HttpMethod.GET, "/api/v1/services/**", "/api/v1/professionals/**").permitAll()
-                .anyRequest().authenticated())                                      // todo lo demás, cerrado
-            .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
-        return http.build();
-    }
-
-    @Bean
-    PasswordEncoder passwordEncoder() { return new BCryptPasswordEncoder(); }
-
-    @Bean
-    AuthenticationManager authenticationManager(AuthenticationConfiguration config) throws Exception {
-        return config.getAuthenticationManager();
-    }
-}
-```
-
-`RestAuthenticationEntryPoint` y `RestAccessDeniedHandler` escriben el mismo `ApiError` de la sección 8.4 (inyecta el mapper JSON que autoconfigura Spring Boot). `AuthUser` implementa `UserDetails`, expone `id()` y `role()`, y devuelve la autoridad `ROLE_<rol>` para que `hasRole('ADMIN')` funcione. Su `isEnabled()` devuelve el campo `active`.
-
-### 11.3 `JwtService` (JJWT 0.13)
-
-```java
-@Service
-public class JwtService {
-
-    private final SecretKey key;
-    private final long expirationMinutes;
-
-    public JwtService(AppProperties props) {
-        this.key = Keys.hmacShaKeyFor(Decoders.BASE64.decode(props.jwt().secret()));   // secreto en Base64, ≥ 256 bits
-        this.expirationMinutes = props.jwt().expirationMinutes();
-    }
-
-    public String generateToken(UserDetails user) {
-        Instant now = Instant.now();
-        return Jwts.builder()
-                .subject(user.getUsername())
-                .claim("roles", user.getAuthorities().stream().map(GrantedAuthority::getAuthority).toList())
-                .issuedAt(Date.from(now))
-                .expiration(Date.from(now.plus(expirationMinutes, ChronoUnit.MINUTES)))
-                .signWith(key)
-                .compact();
-    }
-
-    public String extractUsername(String token) {
-        return parse(token).getSubject();
-    }
-
-    public boolean isValid(String token, UserDetails user) {
-        Claims claims = parse(token);                       // lanza JwtException si firma inválida o expirado
-        return claims.getSubject().equals(user.getUsername());
-    }
-
-    private Claims parse(String token) {
-        return Jwts.parser().verifyWith(key).build().parseSignedClaims(token).getPayload();
-    }
-}
-```
-
-### 11.4 `JwtAuthenticationFilter`
-
-```java
-@Component
-@RequiredArgsConstructor
-public class JwtAuthenticationFilter extends OncePerRequestFilter {
-
-    private final JwtService jwtService;
-    private final CustomUserDetailsService userDetailsService;
-
-    @Override
-    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
-                                    FilterChain chain) throws ServletException, IOException {
-        String header = request.getHeader(HttpHeaders.AUTHORIZATION);
-        if (header != null && header.startsWith("Bearer ")
-                && SecurityContextHolder.getContext().getAuthentication() == null) {
-            String token = header.substring(7);
-            try {
-                UserDetails user = userDetailsService.loadUserByUsername(jwtService.extractUsername(token));
-                if (user.isEnabled() && jwtService.isValid(token, user)) {
-                    var auth = new UsernamePasswordAuthenticationToken(user, null, user.getAuthorities());
-                    auth.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
-                    SecurityContextHolder.getContext().setAuthentication(auth);
-                }
-            } catch (JwtException | IllegalArgumentException | UsernameNotFoundException ex) {
-                // Token inválido o usuario inexistente: se continúa sin autenticar y el EntryPoint responde 401
-            }
-        }
-        chain.doFilter(request, response);
-    }
-}
-```
-
-### 11.5 Checklist de seguridad
-
-- [ ] Contraseñas con BCrypt; nunca se devuelven ni se registran en logs.
-- [ ] `JWT_SECRET` de al menos 256 bits, fuera del repositorio. Token con vida corta (15–60 min).
-- [ ] Todo cerrado por defecto (`anyRequest().authenticated()`); lo público está listado explícitamente.
-- [ ] Cada endpoint probado con el rol permitido **y** con uno no permitido.
-- [ ] Un recurso ajeno responde 404 (RN-13) y la comprobación está en el servicio, no solo en el controlador.
-- [ ] CORS configurado solo para el origen de tu front-end.
-- [ ] Mensajes de login genéricos (no distinguir "email no existe" de "clave incorrecta").
-- [ ] Revisar la lista [OWASP API Security Top 10](https://owasp.org/API-Security/).
-
-> Alternativa oficial de Spring: `spring-boot-starter-security-oauth2-resource-server` valida JWT sin código propio, a cambio de más configuración.
-
----
-
-## 12. Pruebas
-
-### 12.1 Estrategia
-
-| Tipo | Herramienta | Qué probar |
-|---|---|---|
-| Unitarias | JUnit 5 + Mockito | Reglas de negocio de cada `service`: caso feliz y cada error |
-| Repositorio | `@DataJpaTest` + Testcontainers (MySQL real) | Consultas (`countOverlapping`, filtros) y las migraciones Flyway |
-| Controlador | `@WebMvcTest` + `@MockitoBean` | Códigos HTTP, validaciones, seguridad por rol |
-| Integración | `@SpringBootTest` + Testcontainers | Registro → login → reservar → conflicto |
-| Concurrencia | `ExecutorService` | N hilos reservando el mismo horario → exactamente 1 éxito |
-
-Usa MySQL real (Testcontainers) en lugar de H2: las diferencias de SQL y tipos esconden errores.
-
-**Casos mínimos de `AppointmentService.create`:** caso feliz · servicio no ofrecido por el profesional · antes de la anticipación mínima · más allá de `max-days-ahead` · fuera del horario laboral · solape con otra cita del profesional · solape con otra cita del cliente · servicio inactivo.
-
-### 12.2 Postman
-
-**Estructura de la colección**
-
-```
-Citas API
-├── 00 Auth             Register client · Login admin · Login client · Login professional
-├── 01 Services         CRUD (ADMIN) + listado público
-├── 02 Professionals    Alta · Asignar servicios · Working hours
-├── 03 Availability     Horarios libres
-├── 04 Appointments     Crear · Listar · Confirmar · Cancelar · Completar · Reprogramar
-└── 05 Negative tests   401 · 403 · 400 · 404 · 409 · 422
-```
-
-**Variables del environment `local`:** `baseUrl`, `adminToken`, `clientToken`, `professionalToken`, `serviceId`, `professionalId`, `appointmentId`, `slotStart`.
-Cada request usa en *Authorization → Bearer Token* la variable del rol que corresponde (p. ej. `{{clientToken}}`).
-
-Test del login (guarda el token):
-
-```js
-pm.test("Login correcto", () => pm.response.to.have.status(200));
-const body = pm.response.json();
-pm.expect(body.accessToken).to.be.a("string");
-pm.environment.set("clientToken", body.accessToken);
-```
-
-Test de crear cita:
-
-```js
-pm.test("201 Created con Location", () => {
-  pm.response.to.have.status(201);
-  pm.response.to.have.header("Location");
-});
-pm.test("Estado inicial PENDING", () => pm.expect(pm.response.json().status).to.eql("PENDING"));
-pm.environment.set("appointmentId", pm.response.json().id);
-```
-
-### 12.3 Flujo de prueba completo (smoke test)
-
-1. `POST /auth/login` como ADMIN → guarda `adminToken`.
-2. `POST /services` → guarda `serviceId`.
-3. `POST /professionals` (con `serviceIds`) → guarda `professionalId`.
-4. `PUT /professionals/{id}/working-hours` (lunes a viernes 09:00–12:00 y 14:00–18:00).
-5. `POST /auth/login` como profesional → guarda `professionalToken`.
-6. `POST /auth/register` + `POST /auth/login` como cliente → guarda `clientToken`.
-7. `GET /professionals/{id}/availability?date=...&serviceId=...` → guarda el primer `slots[0].start` en `slotStart`.
-8. `POST /appointments` con `startTime = {{slotStart}}` → **201**, guarda `appointmentId`.
-9. Repetir el paso 8 → **409** `SLOT_NOT_AVAILABLE`.
-10. `PATCH /appointments/{id}/confirm` con `professionalToken` → **200** `CONFIRMED`.
-11. `PATCH /appointments/{id}/cancel` con `clientToken` → **200** `CANCELLED` (o **422** si ya pasó la ventana).
-12. Casos negativos: sin token → **401** · cliente creando un servicio → **403** · body inválido → **400** · id inexistente → **404** · confirmar una cita cancelada → **409**.
-
-Para automatizarlo: *Collection Runner* de Postman, o `newman run postman/citas-api.postman_collection.json -e postman/local.postman_environment.json` en CI.
-
-> Con Spring Boot 4 los starters de prueba son modulares y los imports de test cambiaron de paquete (ver tabla de la sección 2). Si dudas, genera el proyecto con Initializr y copia sus dependencias de test.
-
----
-
-## 13. Documentación con Swagger/OpenAPI
-
-```java
-@Configuration
-@OpenAPIDefinition(info = @Info(title = "Citas API", version = "v1",
-        description = "API REST para reserva de citas"))
-@SecurityScheme(name = "bearerAuth", type = SecuritySchemeType.HTTP, scheme = "bearer", bearerFormat = "JWT")
-public class OpenApiConfig {}
-```
-
-- Anota los controladores con `@Tag` y `@SecurityRequirement(name = "bearerAuth")`; los métodos, con `@Operation(summary = "...")` y `@ApiResponse` para los códigos de error.
-- UI: `/swagger-ui.html` · Especificación: `/v3/api-docs`. El botón **Authorize** permite pegar el JWT.
-- En `prod` Swagger queda deshabilitado (`application-prod.yml`).
-
----
-
-## 14. Despliegue y CI
-
-### Dockerfile (multi-etapa)
-
-```dockerfile
-FROM eclipse-temurin:21-jdk AS build
-WORKDIR /app
-COPY .mvn/ .mvn/
-COPY mvnw pom.xml ./
-RUN ./mvnw -B -q dependency:go-offline
-COPY src ./src
-RUN ./mvnw -B -q clean package -DskipTests
-
-FROM eclipse-temurin:21-jre
-WORKDIR /app
-RUN addgroup --system app && adduser --system --ingroup app app
-COPY --from=build /app/target/*.jar app.jar
-ENV TZ=America/Bogota
-USER app
-EXPOSE 8080
-ENTRYPOINT ["java", "-jar", "app.jar"]
-```
-
-### CI con GitHub Actions
-
-```yaml
-# .github/workflows/ci.yml
-name: CI
-on: [push, pull_request]
-jobs:
-  build:
-    runs-on: ubuntu-latest        # incluye Docker, necesario para Testcontainers
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: 21
-          cache: maven
-      - run: ./mvnw -B verify
-```
-
-### Producción
-
-- `SPRING_PROFILES_ACTIVE=prod`; todos los secretos como variables de entorno o gestor de secretos.
-- Usuario de base de datos con permisos mínimos y copias de seguridad automáticas.
-- HTTPS (proxy inverso o balanceador), CORS restringido, Swagger desactivado.
-- `ddl-auto: validate`; los cambios de esquema solo por migraciones Flyway.
-
----
-
-## 15. Buenas prácticas
-
-- **Código en inglés, documentación en español.** Clases `PascalCase`, métodos `camelCase`, tablas y columnas `snake_case`.
-- **Inyección por constructor** (`@RequiredArgsConstructor`), nunca `@Autowired` en campos.
-- `@Transactional` en la capa `service`; `@Transactional(readOnly = true)` en las consultas.
-- **Sin entidades en las respuestas**; DTOs como `record`.
-- Evita el problema N+1 en listados: `join fetch`, `@EntityGraph` o proyecciones.
-- **Logs con SLF4J**, sin `System.out`, sin contraseñas ni tokens.
-- Usa `Clock` en vez de `LocalDateTime.now()` para que las reglas de tiempo sean testeables.
-- **Git:** ramas `main` (estable), `develop` y `feature/<nombre>`; commits tipo *Conventional Commits* (`feat:`, `fix:`, `test:`, `docs:`, `refactor:`, `chore:`); un pull request por fase o funcionalidad.
-- Nunca se hace commit de `.env`, claves ni contraseñas.
-- Un cambio de contrato (endpoint) se refleja primero en la sección 8 y en Swagger.
-
----
-
-## 16. Checklist final
-
-- [ ] Todos los endpoints de la sección 8 implementados y probados en Postman
-- [ ] Ningún endpoint devuelve entidades JPA ni contraseñas
-- [ ] Errores con formato uniforme (400/401/403/404/409/422/500)
-- [ ] Doble reserva imposible (prueba de concurrencia en verde)
-- [ ] Cada endpoint probado con rol permitido y no permitido
-- [ ] Migraciones Flyway versionadas y `ddl-auto: validate`
-- [ ] Sin secretos en el repositorio (`.env` ignorado, `.env.example` al día)
-- [ ] `./mvnw verify` pasa localmente y en CI
-- [ ] Swagger UI muestra todos los endpoints
-- [ ] Colección y environment de Postman exportados en `/postman`
-- [ ] README actualizado (cómo correr, variables, usuarios de prueba)
-- [ ] Un tercero puede levantar el proyecto desde cero siguiendo este README
-
----
-
-## 17. Problemas comunes
-
-| Síntoma | Causa probable | Solución |
-|---|---|---|
-| `Communications link failure` al arrancar | MySQL aún no está listo, o credenciales/puerto incorrectos | `docker compose ps`, revisa `.env` |
-| `Schema-validation: wrong column type...` | La entidad y la tabla no coinciden | Corrige con una **nueva** migración `V{n}`; no edites una ya aplicada |
-| `Migration checksum mismatch` | Editaste una migración ya aplicada | En desarrollo: `docker compose down -v` y vuelve a levantar. En producción: nunca editar |
-| 401 en todos los endpoints | Falta `Authorization: Bearer <token>` o el token expiró | Haz login de nuevo |
-| 403 con token válido | Rol insuficiente o la autoridad no lleva el prefijo `ROLE_` | Revisa `AuthUser.getAuthorities()` |
-| 500 en lugar de 403 con `@PreAuthorize` | El handler genérico captura `AccessDeniedException` | Agrega el handler específico (10.7) |
-| 500 en lugar de 404/405/400 en rutas o cuerpos erróneos | El handler genérico captura excepciones propias de Spring MVC | Agrega sus handlers (nota en 10.7) |
-| `WeakKeyException` al generar el token | `JWT_SECRET` menor a 256 bits | `openssl rand -base64 32` |
-| `LazyInitializationException` | Se accede a una relación `LAZY` fuera de la transacción | Convierte a DTO dentro del servicio o usa `join fetch` |
-| 400 al enviar `date=2026-11-05` | Falta `@DateTimeFormat(iso = ISO.DATE)` en el parámetro | Añade la anotación |
-| Swagger UI falla o da 404 | springdoc no corresponde a tu versión de Boot | Boot 4.1 → springdoc 3.1.x; Boot 4.0 → 3.0.x |
-| Muchos errores de compilación tras copiar un tutorial | El tutorial es de Spring Boot 3 | Revisa la tabla de la sección 2 |
-
----
-
-## 18. Mejoras futuras
-
-- Refresh tokens y cierre de sesión (lista de tokens revocados).
-- Notificaciones por email/WhatsApp y recordatorios programados (`@Scheduled`).
-- Bloqueos de agenda: vacaciones, festivos y ausencias (`time_off`).
-- Citas recurrentes, lista de espera y multi-sede.
-- Pagos y reseñas de profesionales.
-- Soporte multi-zona horaria (`Instant`/UTC).
-- Caché de disponibilidad (Caffeine) y *rate limiting* en login.
-- Observabilidad: Micrometer + Prometheus/Grafana, trazas con identificador de petición.
-- Front-end (React, Angular o móvil) consumiendo el contrato OpenAPI.
-
----
-
-## 19. Referencias
-
-- Spring Initializr: <https://start.spring.io>
-- Spring Boot (documentación): <https://docs.spring.io/spring-boot/>
-- Spring Security (documentación): <https://docs.spring.io/spring-security/reference/>
-- springdoc-openapi: <https://springdoc.org>
-- JJWT: <https://github.com/jwtk/jjwt>
-- OWASP API Security Top 10: <https://owasp.org/API-Security/>
+- [docs/GUIA.md](docs/GUIA.md): requisitos y reglas de negocio, modelo de datos, contrato de la API (sección 8), plan por fases, seguridad, pruebas y despliegue.
+- Swagger UI en `/swagger-ui.html`, con la API corriendo en el perfil `dev`.

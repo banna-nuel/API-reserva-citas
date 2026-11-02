@@ -1,0 +1,48 @@
+server:
+  port: ${APP_PORT:8080}
+
+spring:
+  application:
+    name: citas-api
+  config:
+    import: optional:file:.env[.properties]
+  datasource:
+    url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME:citas_db}
+    username: ${DB_USER}
+    password: ${DB_PASS}
+  jpa:
+    open-in-view: false            # evita consultas "ocultas" en la capa web
+    hibernate:
+      ddl-auto: validate           # el esquema lo manda Flyway, Hibernate solo valida
+  data:
+    web:
+      pageable:
+        default-page-size: 20
+        max-page-size: 100
+  jackson:
+    deserialization:
+      accept-float-as-int: false   # 30.5 o 30.0 donde va un entero -> 400 MALFORMED_REQUEST (no se trunca)
+
+springdoc:
+  default-produces-media-type: application/json   # sin esto, Swagger muestra las respuestas como */*
+  default-consumes-media-type: application/json
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+app:
+  timezone: America/Bogota
+  jwt:
+    secret: ${JWT_SECRET}
+    expiration-minutes: ${JWT_EXPIRATION_MINUTES:60}
+  booking:
+    slot-step-minutes: 30          # cada cuántos minutos se ofrece un horario
+    min-notice-minutes: 60         # anticipación mínima para reservar (RN-04)
+    max-days-ahead: 60             # hasta cuántos días a futuro se puede reservar (RN-04)
+    cancel-limit-hours: 2          # el cliente cancela hasta N horas antes (RN-08)
+  admin:
+    email: ${ADMIN_EMAIL:}
+    password: ${ADMIN_PASSWORD:}
