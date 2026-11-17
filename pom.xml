@@ -14,6 +14,10 @@
 	<name>citas-api</name>
 	<description>API REST para reserva de citas</description>
 	<url>https://github.com/banna-nuel/API-reserva-citas</url>
+	<organization>
+		<name>banna-nuel</name>
+		<url>https://github.com/banna-nuel</url>
+	</organization>
 	<licenses>
 		<license>
 			<name>MIT License</name>
