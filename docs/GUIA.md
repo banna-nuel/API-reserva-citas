@@ -2107,8 +2107,8 @@ jobs:
 - [x] Cada endpoint probado con rol permitido y no permitido
 - [x] Migraciones Flyway versionadas y `ddl-auto: validate`
 - [x] Sin secretos en el repositorio (`.env` ignorado, `.env.example` al día)
-- [ ] `./mvnw verify` pasa localmente y en CI
-- [ ] Swagger UI muestra todos los endpoints
+- [x] `./mvnw verify` pasa localmente y en CI
+- [x] Swagger UI muestra todos los endpoints
 - [ ] Colección y environment de Postman exportados en `/postman`
 - [x] README actualizado (cómo correr, variables, usuarios de prueba)
 - [ ] Un tercero puede levantar el proyecto desde cero siguiendo el README
