@@ -13,6 +13,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -23,6 +25,7 @@ import org.springframework.test.context.TestPropertySource;
 import com.jayway.jsonpath.JsonPath;
 import com.q.q.IntegrationTest;
 import com.q.q.TestClockConfiguration;
+import com.q.q.TestDatabase;
 import com.q.q.TestcontainersConfiguration;
 import com.q.q.entity.Appointment;
 import com.q.q.entity.enums.AppointmentStatus;
@@ -38,7 +41,7 @@ import tools.jackson.databind.json.JsonMapper;
  * MockMvc. El reloj está fijo en el lunes 2026-11-02 a las 08:00 (TestClockConfiguration).
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@Import({ TestcontainersConfiguration.class, TestClockConfiguration.class })
+@Import({ TestcontainersConfiguration.class, TestClockConfiguration.class, TestDatabase.class })
 @TestPropertySource(properties = {
 		"app.jwt.secret=" + IntegrationTest.JWT_SECRET,
 		"app.jwt.expiration-minutes=60",
@@ -68,6 +71,17 @@ class BookingFlowEndToEndTest {
 
 	@Autowired
 	private ServiceOfferingRepository services;
+
+	// Si otra clase llega a usar este mismo contexto, compartirá la base: esta la encuentra y la deja solo con el ADMIN
+	@BeforeAll
+	static void startFromAKnownDatabase(@Autowired TestDatabase database) {
+		database.reset();
+	}
+
+	@AfterAll
+	static void leaveAKnownDatabase(@Autowired TestDatabase database) {
+		database.reset();
+	}
 
 	private record Response(int status, String body, String location) {
 
