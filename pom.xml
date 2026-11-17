@@ -13,18 +13,23 @@
 	<version>0.0.1-SNAPSHOT</version>
 	<name>citas-api</name>
 	<description>API REST para reserva de citas</description>
-	<url/>
+	<url>https://github.com/banna-nuel/API-reserva-citas</url>
 	<licenses>
-		<license/>
+		<license>
+			<name>MIT License</name>
+			<url>https://opensource.org/licenses/MIT</url>
+		</license>
 	</licenses>
 	<developers>
-		<developer/>
+		<developer>
+			<id>banna-nuel</id>
+			<url>https://github.com/banna-nuel</url>
+		</developer>
 	</developers>
 	<scm>
-		<connection/>
-		<developerConnection/>
-		<tag/>
-		<url/>
+		<connection>scm:git:https://github.com/banna-nuel/API-reserva-citas.git</connection>
+		<developerConnection>scm:git:https://github.com/banna-nuel/API-reserva-citas.git</developerConnection>
+		<url>https://github.com/banna-nuel/API-reserva-citas</url>
 	</scm>
 	<properties>
 		<java.version>21</java.version>
