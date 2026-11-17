@@ -2109,7 +2109,7 @@ jobs:
 - [x] Sin secretos en el repositorio (`.env` ignorado, `.env.example` al día)
 - [x] `./mvnw verify` pasa localmente y en CI
 - [x] Swagger UI muestra todos los endpoints
-- [ ] Colección y environment de Postman exportados en `/postman`
+- [x] Colección y environment de Postman exportados en `/postman` (verificada con un ejecutor propio de scripts; sin abrir la app de Postman)
 - [x] README actualizado (cómo correr, variables, usuarios de prueba)
 - [ ] Un tercero puede levantar el proyecto desde cero siguiendo el README
 
