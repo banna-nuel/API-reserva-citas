@@ -43,6 +43,8 @@ El puerto es el valor de `APP_PORT`, 8080 por defecto. Swagger UI existe con el 
 
 Ejecuta `./mvnw -B verify` en Linux o macOS, o `.\mvnw.cmd -B verify` en Windows. Requiere Docker en ejecución, porque las pruebas de integración usan Testcontainers. Tarda unos 5 minutos. El informe de cobertura queda en `target/site/jacoco/index.html`.
 
+Las pruebas de integración comparten un mismo MySQL: cada clase lo deja solo con el ADMIN al empezar y al terminar con `TestDatabase` (`src/test/java/com/q/q/TestDatabase.java`), así el resultado no depende del orden de las clases.
+
 ## Docker
 
 `docker compose --profile app up -d --build` levanta MySQL y la API en contenedores. La API corre con el perfil de Spring prod. `SPRING_PROFILES_ACTIVE` en `.env` cambia ese perfil. `docker compose --profile app stop app` detiene solo la API.
