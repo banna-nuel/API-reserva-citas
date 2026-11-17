@@ -413,7 +413,7 @@ DB_USER=citas_user
 DB_PASS=cambia-esta-clave
 DB_ROOT_PASS=cambia-esta-clave-root
 
-# JWT: secreto en Base64 de 32 bytes o más (cómo generarlo: README, paso 2 "Crear el .env")
+# JWT: secreto en Base64 de 32 bytes o más (cómo generarlo: docs/desarrollo.md, sección Configuración)
 JWT_SECRET=PEGA_AQUI_EL_SECRETO
 JWT_EXPIRATION_MINUTES=60
 
