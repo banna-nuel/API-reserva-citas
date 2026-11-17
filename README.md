@@ -123,7 +123,7 @@ Terminado (primera versión): funciona todo lo descrito arriba. Las mejoras futu
 
 Hecho por Emanuel ([Banna-nuel](https://github.com/Banna-nuel)).
 
-Aún no tiene licencia definida (el permiso que dice qué pueden hacer otros con un proyecto). Para reutilizarlo, pide permiso a su autor.
+Licencia MIT. Puedes usar, copiar y cambiar este programa. Debes conservar el aviso de autor. Se entrega tal cual, sin garantía.
 
 ## Palabras que quizá no conozcas
 
