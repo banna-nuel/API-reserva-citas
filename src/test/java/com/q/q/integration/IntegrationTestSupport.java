@@ -11,6 +11,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -22,6 +24,7 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 
 import com.jayway.jsonpath.JsonPath;
 import com.q.q.IntegrationTest;
+import com.q.q.TestDatabase;
 import com.q.q.entity.User;
 import com.q.q.repository.UserRepository;
 
@@ -47,6 +50,17 @@ abstract class IntegrationTestSupport {
 
 	@Autowired
 	protected UserRepository users;
+
+	// Todas las clases de integración comparten la base: cada subclase la encuentra y la deja solo con el ADMIN
+	@BeforeAll
+	static void startFromAKnownDatabase(@Autowired TestDatabase database) {
+		database.reset();
+	}
+
+	@AfterAll
+	static void leaveAKnownDatabase(@Autowired TestDatabase database) {
+		database.reset();
+	}
 
 	protected static String uniqueEmail() {
 		return "cliente" + SEQUENCE.incrementAndGet() + "-" + System.nanoTime() + "@mail.test";

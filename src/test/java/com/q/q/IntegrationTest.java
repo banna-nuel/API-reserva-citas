@@ -23,7 +23,7 @@ import com.q.q.integration.AdminOnlyProbeController;
 @Documented
 @SpringBootTest
 @AutoConfigureMockMvc
-@Import({ TestcontainersConfiguration.class, TestClockConfiguration.class, AdminOnlyProbeController.class })
+@Import({ TestcontainersConfiguration.class, TestClockConfiguration.class, TestDatabase.class, AdminOnlyProbeController.class })
 @TestPropertySource(properties = {
 		"app.jwt.secret=" + IntegrationTest.JWT_SECRET,
 		"app.jwt.expiration-minutes=60",
