@@ -1,82 +1,147 @@
-# citas-api
+# Citas API
 
-API REST de reserva de citas.
+Un programa que lleva la agenda de un negocio que atiende con cita previa: servicios, profesionales, horarios y reservas.
 
-Stack: Java 21, Spring Boot, MySQL, Flyway, JWT.
+Es una API (la forma en que dos programas se hablan): otro programa le pide datos y ella responde.
 
-## Requisitos
+![Página de Swagger UI con el título Citas API y los grupos Usuarios, Servicios, Citas, Profesionales y Auth](docs/capturas/swagger-ui.png)
+*Swagger UI: el título Citas API y los cinco grupos de operaciones que se pueden probar.*
 
-Java 21. Docker y Docker Compose.
+## ¿Qué es?
 
-## Configuración
+Guarda los servicios y horarios de cada profesional, y calcula sus horas libres. Nunca deja reservar dos veces la misma hora de un profesional.
 
-Copia `.env.example` a `.env` y reemplaza los valores de ejemplo. El archivo `.env` no se versiona. `JWT_SECRET` es un valor Base64 de 32 bytes o más.
+No trae pantallas propias: se prueba con Swagger UI (una página para probar una API con botones).
 
-```
-# Linux o macOS
-cp .env.example .env
-openssl rand -base64 32
-# PowerShell
-Copy-Item .env.example .env
-$b = New-Object byte[] 32; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); [Convert]::ToBase64String($b)
-```
+**Para quién es.** Negocios que atienden con cita previa, como un consultorio o una barbería.
 
-El segundo comando de cada sistema genera el valor de `JWT_SECRET`. Al iniciar, la aplicación crea el usuario ADMIN con `ADMIN_EMAIL` y `ADMIN_PASSWORD` si no existe. `ADMIN_PASSWORD` necesita entre 8 y 72 caracteres.
+## Qué puedes hacer
 
-## Ejecución
+- **Consultar el catálogo.** Servicios, precios y quién los atiende.
+- **Reservar una cita.** En una hora libre, desde una hora antes hasta 60 días después.
+- **Cancelar o cambiar una cita.** El cliente cancela hasta 2 horas antes.
+- **Llevar la agenda.** El profesional confirma citas y marca si el cliente asistió.
+- **Administrar el negocio.** El administrador gestiona servicios, profesionales, horarios y usuarios.
 
-```
-docker compose up -d
-./mvnw spring-boot:run -Dspring-boot.run.profiles=dev          # Linux o macOS
-.\mvnw.cmd spring-boot:run "-Dspring-boot.run.profiles=dev"    # Windows
-```
+## Cómo probarlo en tu computador
 
-El puerto es el valor de `APP_PORT`, 8080 por defecto. Swagger UI existe con el perfil dev. En el perfil prod está desactivado.
+### Antes de empezar
 
-- API: `http://localhost:8080/api/v1`
-- Swagger UI: `http://localhost:8080/swagger-ui.html`
-- Health: `http://localhost:8080/actuator/health`
+> **Qué es la terminal.** Una ventana donde se escriben órdenes. En Windows, busca "PowerShell" en el menú Inicio. En Mac, busca "Terminal" con ⌘ + espacio.
+>
+> **Cómo usarla.** Copia la orden de esta página (el README). Pégala en la ventana con Ctrl + V (las teclas Control y V a la vez; en Mac, ⌘ + V). Luego pulsa Enter. No necesitas entenderla: cópiala tal cual. Si algo sale mal, aparece un mensaje que suele incluir la palabra «error».
 
-## Pruebas
+Necesitas tener instalado:
 
-Ejecuta `./mvnw -B verify` en Linux o macOS, o `.\mvnw.cmd -B verify` en Windows. Requiere Docker en ejecución, porque las pruebas de integración usan Testcontainers. Tarda unos 5 minutos. El informe de cobertura queda en `target/site/jacoco/index.html`.
+| Programa | Para qué sirve | Cómo saber si ya lo tienes |
+|---|---|---|
+| [Docker Desktop](https://www.docker.com/products/docker-desktop/) | Prepara la API y su base de datos (donde guarda su información). | Escribe `docker compose version` en la terminal: debe aparecer un número de versión. |
 
-## Docker
+Si te falta algún programa, descárgalo desde su enlace, ábrelo y sigue los pasos del instalador.
 
-`docker compose --profile app up -d --build` levanta MySQL y la API en contenedores. La API corre con el perfil de Spring prod. `SPRING_PROFILES_ACTIVE` en `.env` cambia ese perfil. `docker compose --profile app stop app` detiene solo la API.
+### Pasos
 
-## Variables
+1. **Descarga el proyecto.** En la página de este proyecto en GitHub (donde estás leyendo esto), pulsa el botón verde **Code**. Luego elige **Download ZIP**. Se descarga un archivo comprimido (.zip): haz clic derecho sobre él y elige **Extraer todo**. Se crea una carpeta con el mismo nombre: esa es la carpeta del proyecto.
+   La página es [github.com/banna-nuel/API-reserva-citas](https://github.com/banna-nuel/API-reserva-citas).
 
-| Variable | Descripción |
-|---|---|
-| `APP_PORT` | Puerto de la API. 8080 por defecto. |
-| `DB_HOST` | Host de MySQL. `localhost` con el compose del proyecto. |
-| `DB_PORT` | Puerto de MySQL en la máquina. |
-| `DB_NAME` | Nombre de la base de datos. |
-| `DB_USER` | Usuario de MySQL de la aplicación. |
-| `DB_PASS` | Clave de `DB_USER`. |
-| `DB_ROOT_PASS` | Clave de root del contenedor de MySQL. |
-| `JWT_SECRET` | Secreto de firma de los JWT. Base64 de 32 bytes o más. |
-| `JWT_EXPIRATION_MINUTES` | Vigencia de los tokens, en minutos. |
-| `ADMIN_EMAIL` | Email del usuario ADMIN inicial. |
-| `ADMIN_PASSWORD` | Clave del usuario ADMIN inicial. |
-| `SPRING_PROFILES_ACTIVE` | Opcional. Perfil de Spring del contenedor `app`. prod por defecto. |
+2. **Abre la terminal en la carpeta del proyecto.** Es la que tiene el archivo `docker-compose.yml`. Escribe `cd` (la orden para entrar a una carpeta) y un espacio. Arrastra la carpeta a la ventana y pulsa Enter.
+   Vas bien si ves el nombre de la carpeta.
 
-## Postman
+3. **Crea tu archivo de configuración.** El archivo `.env` guarda tu configuración privada. En la terminal, escribe:
+   ```
+   cp .env.example .env
+   ```
+   Vas bien si no aparece ningún mensaje de error.
 
-Importa `postman/citas-api.postman_collection.json` y `postman/local.postman_environment.json`. En el environment Citas API (local), completa `baseUrl`, `adminEmail` y `adminPassword`. `baseUrl` es `http://localhost:8080/api/v1` con el puerto de `APP_PORT`. Ejecuta la colección Citas API con Collection Runner, en el orden por defecto.
+4. **Genera tu clave secreta.** La API la usa para proteger cada inicio de sesión. En la terminal de Windows:
+   ```
+   $b = New-Object byte[] 32; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); [Convert]::ToBase64String($b)
+   ```
+   En la de Mac:
+   ```
+   openssl rand -base64 32
+   ```
+   Vas bien si aparece una línea que termina en `=`. Cópiala.
 
-## Problemas comunes
+5. **Abre el archivo `.env`.** En la terminal de Windows:
+   ```
+   notepad .env
+   ```
+   En la de Mac:
+   ```
+   open -e .env
+   ```
+   Vas bien si se abre un texto que empieza por `# Aplicación`.
 
-| Problema | Solución |
-|---|---|
-| `The JAVA_HOME environment variable is not defined correctly` | `JAVA_HOME` debe apuntar a la carpeta del JDK, no a su carpeta `bin`. |
-| Puerto 3306 ocupado | Cambia `DB_PORT` en `.env`. |
-| Puerto 8080 ocupado | Cambia `APP_PORT` en `.env`, por ejemplo a 8081. |
-| `verify` o `docker compose` no conectan con Docker | Inicia Docker Desktop y espera a que `docker info` responda. |
-| La aplicación ignora la primera variable de `.env` | El archivo tiene BOM. Guárdalo como UTF-8 sin BOM. |
-| `docker compose --build` falla con `failed to execute bake` | Abre la terminal en la carpeta del proyecto con la capitalización exacta de la ruta. |
+6. **Cambia estas líneas de ejemplo.**
 
-## Documentación
+   | Línea | Qué hacer |
+   |---|---|
+   | `# SPRING_PROFILES_ACTIVE=dev` | Enciende Swagger UI: borra el `#` y el espacio. |
+   | `DB_PASS=cambia-esta-clave` | Contraseña de la base de datos: `TU_CLAVE_BD`. |
+   | `DB_ROOT_PASS=cambia-esta-clave-root` | Contraseña maestra de la base de datos; la API no la usa: `TU_CLAVE_ROOT`. |
+   | `JWT_SECRET=PEGA_AQUI_EL_SECRETO` | Pega la clave del paso 4. |
+   | `ADMIN_EMAIL=admin@example.com` | Correo del administrador: `TU_CORREO`. |
+   | `ADMIN_PASSWORD=cambia-esta-clave` | Su contraseña, de 8 a 72 caracteres: `TU_CONTRASEÑA`. |
 
-`docs/GUIA.md` contiene el diseño, las reglas de negocio y el contrato de la API.
+   Guarda con Ctrl + S (en Mac, ⌘ + S) y cierra.
+
+7. **Enciende la API.** Con Docker Desktop abierto, escribe en la terminal:
+   ```
+   docker compose --profile app up -d --build
+   ```
+   La primera vez puede tardar unos minutos. Vas bien si no aparece ningún mensaje de error.
+
+8. **Abre Swagger UI.** Escribe esta dirección en tu navegador (el programa con el que ves páginas web):
+   ```
+   http://localhost:8080/swagger-ui.html
+   ```
+   `localhost` es «este mismo computador» y 8080 es el puerto (la «puerta» de entrada). Solo funciona con la API encendida.
+   Vas bien si ves una página con el título `Citas API`.
+
+Para apagar la API, escribe en la terminal `docker compose --profile app down`. Sin `-v` al final, tus datos no se borran.
+
+### ¿Cómo sé que funcionó?
+
+Swagger UI muestra los grupos Usuarios, Servicios, Citas, Profesionales y Auth (autenticación: registro e inicio de sesión). El administrador ya existe, con los datos de tu `.env`.
+
+Las operaciones con el ícono de un candado piden iniciar sesión. Para usarlas, abre `Iniciar sesión` y pega el `accessToken` de la respuesta en **Authorize**. Es un token (una contraseña temporal).
+
+### Si algo falla
+
+- **Docker Desktop no responde.** Ábrelo, espera a que arranque y repite el paso 7.
+- **Swagger UI da error 404 (página no encontrada).** Quita el `#` de `SPRING_PROFILES_ACTIVE=dev` y repite el paso 7.
+- **El puerto 8080 está ocupado.** En `.env`, cambia `APP_PORT=8080` por `APP_PORT=8081`, repite el paso 7 y usa 8081.
+
+Para programar, lee [docs/desarrollo.md](docs/desarrollo.md): pruebas, variables, Postman (un programa para probar APIs) y problemas comunes. También explica cómo correr la API fuera de Docker Desktop. El diseño y las reglas de negocio están en [docs/GUIA.md](docs/GUIA.md).
+
+## Estado del proyecto
+
+Terminado (primera versión): funciona todo lo descrito arriba. Las mejoras futuras están en la guía, sección 18.
+
+## Autor y licencia
+
+Hecho por Emanuel ([Banna-nuel](https://github.com/Banna-nuel)).
+
+Aún no tiene licencia definida (el permiso que dice qué pueden hacer otros con un proyecto). Para reutilizarlo, pide permiso a su autor.
+
+## Palabras que quizá no conozcas
+
+- **.env.** Un archivo de texto con la configuración privada del proyecto.
+- **API.** La forma en que dos programas se hablan.
+- **Archivo comprimido (ZIP).** Un archivo que guarda muchos archivos juntos y en menos espacio.
+- **Autenticación.** Registrarse e iniciar sesión.
+- **Base de datos.** El lugar donde la API guarda su información.
+- **cd.** La orden para entrar a una carpeta desde la terminal.
+- **Docker Desktop.** Un programa que prepara en tu computador todo lo que la API necesita.
+- **Error 404.** El aviso de que una página no existe.
+- **GitHub.** Una página web para guardar y compartir proyectos.
+- **Licencia.** El permiso que dice qué pueden hacer otros con un proyecto.
+- **localhost.** Tu propio computador funcionando como sitio web, solo para ti.
+- **Navegador.** El programa con el que ves páginas web.
+- **Postman.** Un programa para enviar peticiones a una API y ver sus respuestas.
+- **Puerto.** El número de "puerta" por donde entra una conexión.
+- **README.** El archivo que presenta un proyecto.
+- **Swagger UI.** Una página para probar una API con botones.
+- **Terminal.** Una ventana donde se escriben órdenes.
+- **Token.** Una contraseña que usa un programa para identificarse.
